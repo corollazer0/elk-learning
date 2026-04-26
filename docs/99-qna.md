@@ -166,6 +166,302 @@ flowchart TD
 
 ---
 
+## Q-03. Platinum 라이선스가 있다면 어디까지 추가 활용 가능?
+
+- **출처**: 사용자 제기 (사내 라이선스 = Platinum 확인)
+- **맥락**: 본 학습 환경(로컬, free tier) 은 Basic 만 사용. 실 운영(폐쇄망) 은 Platinum. Free 에서 실습 안 되는 기능은 지식 학습으로만.
+
+### A — Platinum 에서만 풀리는 운영 가치 큰 기능
+
+| 기능 | 라이선스 | 활용도 | 우리 환경 적용 시 |
+|---|---|---|---|
+| **ML Anomaly Detection** | Platinum | ⭐⭐⭐ | M-O5 (DoD/WoW) 임계 룰 대신 자동 anomaly. 시간대/요일 자연 패턴 학습 |
+| **Searchable Snapshots** | Enterprise | ⭐⭐⭐ | ILM cold/frozen 데이터를 S3-like 에 저장 (90% 비용 절감) |
+| **Cross-Cluster Search/Replication** | Platinum | ⭐⭐ | 다중 데이터센터 / DR (Disaster Recovery) |
+| **Field-level Security** | Platinum | ⭐⭐ | 같은 인덱스에서 사용자별 보이는 필드 다르게 (예: PII 차폐) |
+| **Document-level Security** | Platinum | ⭐⭐ | 같은 인덱스에서 행 단위 권한 (예: 부서별) |
+| **Auditing** | Platinum | ⭐⭐ | 누가 언제 무엇을 query 했는지 기록 (compliance) |
+| **Customizable Kibana Branding** | Platinum | ⭐ | 사내 로고 / 색상 / 도메인 (cosmetic) |
+| **Watcher (advanced)** | Gold+ | ⭐⭐ | (이미 Gold 부터) 복잡한 alert 체인 |
+| **Reporting (PDF/CSV)** | Gold+ | ⭐⭐ | dashboard PDF 자동 발송 (D-K1 주간 보고 자동화) |
+
+### Platinum 활용 시나리오 — 우리 09 전략 강화
+
+**1. ML Anomaly Detection 도입**
+- 현재: M-O5 (DoD/WoW) 단순 임계로 anomaly 감지 → false-positive 가끔
+- Platinum: ML Job 이 시간대 × 요일 × 서비스 자연 패턴 학습 → "월요일 9시는 평소 +50%, 화요일 9시는 평소 +20%" 같이 정밀 base line
+- 결과: alert noise 70%↓, 진짜 anomaly 잡기 ↑
+
+**2. Searchable Snapshots — Cold Tier 비용 절감**
+- 현재 ILM: Hot (7d) → Warm (30d) → Cold (60d) → Delete (90d)
+- Platinum: Cold/Frozen 을 S3 / Azure Blob 에 snapshot 저장. ES 노드 디스크 대신 object storage. **90일 데이터 보존 비용 ~90% ↓**
+- 1억 docs/일 × 90일 = 9TB 규모에서 큰 절감
+
+**3. Field-level Security**
+- 우리 PII 마스킹 정책 ([10-field-policy 등](10-field-policy.md)) 보다 ES 자체에서 처리
+- 사용자 role 별로 `data.body.cardNumber`, `data.body.juminNo` 차폐
+- 로그 분석가는 보지만 운영자는 못 봄 — 라이선스/감사 강력
+
+**4. Cross-Cluster Replication (CCR)**
+- 1 cluster down → 자동 failover
+- 다중 데이터센터 운영 시 필수
+
+### 본 가이드 내 Platinum 마킹 정책
+
+각 문서에서 Platinum 전용 부분은 다음 박스로 표시:
+
+> 💎 **Platinum+ 기능** — 본 학습 환경(Basic) 에선 실습 불가. 사내 운영 환경에서 활용 가능.
+
+### 문서 보강
+- ✅ 본 99-qna 에 정식 등록
+- ✅ [09-monitoring-strategy.md](09-monitoring-strategy.md) 에 Platinum 박스 추가 (다음 push)
+
+---
+
+## Q-04. ML Anomaly Detection 이 인프라 자원 많이 필요한가?
+
+- **출처**: 사용자 제기 (Q-03 의 후속)
+- **맥락**: ML Job 운영을 결정하기 전 인프라 부담 평가.
+
+### A — 결론: **꽤 큼. dedicated 노드 권장**.
+
+```mermaid
+flowchart LR
+    Raw[("api-logs-*<br/>1억 docs/일")] --> DF["📥 Datafeed<br/>5~30분마다 새 데이터 fetch"]
+    DF --> ML["🧠 ML Job<br/>(.ml-* 시스템 인덱스)"]
+    ML --> Train["🎓 학습 단계<br/>14일+ baseline 필요"]
+    ML --> Predict["🔮 예측 단계<br/>실시간 anomaly score"]
+    Predict --> Alert[Alert 룰 발동]
+
+    ML -.heap.-> Mem["⚙️ Memory<br/>per job 100MB ~ 4GB"]
+
+    style ML fill:#fff9c4
+    style Mem fill:#ffcdd2
+```
+
+### 자원 부담 — 우리 환경 (11 MSA / 1억 docs/일)
+
+| 항목 | 추정 부담 |
+|---|---|
+| **ML 노드** | 권장: 1~2개 dedicated (16GB+ RAM each) |
+| **Job 1개당 heap** | 단순 (count anomaly): 100~512MB / 복잡 (multi-metric): 1~4GB |
+| **권장 jobs 수** | 5~10개 (서비스별 + critical API 별) → **합 5~25GB heap** |
+| **Datafeed 부하** | 5분마다 raw 인덱스 query → ES heap +CPU. transform 인덱스 가리키면 부담 ↓ |
+| **저장 공간** | `.ml-*` 시스템 인덱스 — 모델 저장 보통 1~5GB / job |
+| **학습 기간** | 14일+ baseline 필요. 그 전엔 false-positive 많음 |
+| **CPU** | predict 단계 지속 (ML 노드 평균 30~50% 사용 가정) |
+
+### 3가지 deployment 패턴
+
+#### Pattern 1: 스파르탄 (별도 노드 X)
+
+기존 데이터 노드 위에 ML 띄우기.
+- ✅ 인프라 추가 0
+- ❌ 검색 성능 영향 ↑, ES heap 압박 위험
+- 🟡 PoC / 작은 규모만
+
+#### Pattern 2: Dedicated ML 노드 1개
+
+ML 전용 노드 1개 (16GB+ RAM).
+- ✅ 검색 노드 분리 보호
+- ✅ 5~10 jobs 수용
+- 🟢 **본 환경 권장 시작점**
+
+#### Pattern 3: ML 노드 2~3개 클러스터링
+
+대규모 jobs (50+) / 다중 cluster.
+- 비용 ↑↑
+- 우리 규모엔 과함
+
+### Spring Boot 비유
+
+| ES | Spring Boot |
+|---|---|
+| ML Job | `@Scheduled` 잡 + 통계학 모델 (예: ARIMA) 라이브러리 |
+| Datafeed | `@Scheduled(fixedDelay)` |
+| .ml-* 시스템 인덱스 | 모델 weight 저장하는 별도 DB 테이블 |
+| Anomaly score | application 이 계산해서 metric 으로 발행 |
+
+→ 직접 Spring Batch + Smile/Apache Commons Math 같이 짜면 비슷한 효과 가능. 다만 ES ML 은 데이터 위치 (이미 ES 안) + 통합 GUI + multi-bucket 자동 관리 등이 큰 장점.
+
+### 권장 시작
+
+1. PoC: 1 job (전체 traffic anomaly) — 노드 추가 없이 7일 운영
+2. 효과 좋으면: dedicated ML 노드 1개 추가 + 5~10 jobs 확장
+3. 비용 검증: ML 라이선스 + 노드 대비 alert noise 감소 가치
+
+### 문서 보강
+- ✅ 본 99-qna 에 정식 등록
+- 추후 09 문서에 "ML 도입 시 인프라 sizing" 부록 가능
+
+---
+
+## Q-05. Transform 이 무슨 개념? Spring Batch 와 같나?
+
+- **출처**: 사용자 제기 (07 문서 학습 보강)
+- **맥락**: Transform 의 정확한 메커니즘 + Java 생태계 비유.
+
+### A — **거의 Spring Batch + Materialized View 의 결합**.
+
+#### 1줄 정의
+"ES source 인덱스의 데이터를 group_by + aggregations 으로 사전 집계해서 dest 인덱스에 적재하는 ES 내장 ETL 엔진".
+
+#### Spring Batch 와의 직접 비유
+
+```mermaid
+flowchart LR
+    subgraph SB["Spring Batch"]
+      Reader[ItemReader<br/>Source 읽기]
+      Processor[ItemProcessor<br/>변환]
+      Writer[ItemWriter<br/>Target 쓰기]
+      Reader --> Processor --> Writer
+    end
+    subgraph TR["ES Transform"]
+      Source[source.index<br/>+ query]
+      Pivot[pivot.group_by<br/>+ aggregations]
+      Dest[dest.index]
+      Source --> Pivot --> Dest
+    end
+
+    Reader -.같은 역할.-> Source
+    Processor -.같은 역할.-> Pivot
+    Writer -.같은 역할.-> Dest
+
+    style SB fill:#e3f2fd
+    style TR fill:#c8e6c9
+```
+
+| Spring Batch | ES Transform |
+|---|---|
+| `JobLauncher` | `_transform/<id>/_start` API |
+| `JpaItemReader<Source>` | `source.index` + `query` |
+| `ItemProcessor<S, T>` | `pivot.group_by` + `aggregations` |
+| `JpaItemWriter<Target>` | `dest.index` |
+| `@Scheduled(fixedDelay = 5min)` | `frequency: "5m"` |
+| `@StepScope` (chunk-oriented) | continuous mode 의 increment processing |
+| Late-arriving data 처리 | `sync.delay` (예: 60s 대기 후 fetch) |
+| Failed step retry | task API + 자동 재시도 |
+| Job repository | `_transform/_stats` API |
+
+#### 차이점
+
+| 측면 | Spring Batch | ES Transform |
+|---|---|---|
+| 정의 | Java 코드 (Job/Step bean) | JSON DSL (선언적) |
+| 실행 위치 | application JVM | ES 클러스터 자체 |
+| 데이터 위치 | RDB ↔ Java ↔ RDB | ES → ES (이동 없음, in-cluster) |
+| 모드 | one-shot 또는 cron | one-shot 또는 **continuous** (실시간 점진) |
+| GUI | (없음, 코드 작성) | Kibana Stack Management → Transforms |
+| 라이선스 | OSS | Basic (free) |
+
+#### 우리 환경 적용 예
+
+[07-batch-transform.md](07-batch-transform.md) §7.3 의 Transform 정의 = Spring Batch 의 다음과 같은 잡을 ES 내장으로:
+
+```java
+// Spring Batch 등가 의사코드
+@Bean
+public Job apiStatsDailyJob() {
+  return jobBuilder
+    .start(step("read-out-logs")
+      .reader(esReader.query(termQuery("log_type", "out")))
+      .processor((doc) -> aggregateBy(doc.serviceName, doc.apiPath, doc.timestamp))
+      .writer(esWriter.toIndex("api-stats-daily")))
+    .build();
+}
+```
+
+→ Java 코드 없이 ES 내부에서 동일 효과 + 5분마다 자동 점진.
+
+#### Materialized View 와도 비유 가능
+
+Oracle / PostgreSQL 의 materialized view = 사전 계산된 query 결과 저장. Transform 의 dest 인덱스 = 그것과 거의 동일 컨셉. 차이는 **자동 점진 갱신** 까지 ES 가 해줌.
+
+### 문서 보강
+- ✅ 본 99-qna 에 정식 등록
+- ✅ [07-batch-transform.md](07-batch-transform.md) 에 Spring Batch 비유 추가 (다음 push)
+
+---
+
+## Q-06. Rollup 무슨 개념? Java 비유?
+
+- **출처**: 사용자 제기
+- **맥락**: 07 문서에 Rollup 도 언급되지만 deprecated 라고만 — 정확한 개념 + 비유 필요.
+
+### A — **Transform 의 단순화 ancestor (시계열 합산 전용)**.
+
+#### 1줄 정의
+"시계열 데이터를 시간 bucket × terms 로 사전 집계하는 ES 내장 잡 — Transform 의 limited 버전".
+
+#### Spring Batch / Java 비유
+
+```java
+// Rollup 등가 — Spring 의 매우 단순한 시계열 sum 잡
+@Scheduled(cron = "0 0 1 * * ?")  // 매일 01:00
+public void hourlyAggregate() {
+  for (each hour in last 1d) {
+    for (each service) {
+      long count = countLogs(hour, service);
+      double avg  = avgDuration(hour, service);
+      saveToTable(hour, service, count, avg);   // 단순 sum/avg/count/min/max만
+    }
+  }
+}
+```
+
+→ **percentile, cardinality, formula 등 복잡한 aggregation 못 함**. count/sum/avg/min/max 기본 5개만.
+
+#### Transform vs Rollup 차이
+
+| 기능 | Rollup (legacy) | Transform |
+|---|:---:|:---:|
+| count | ✅ | ✅ |
+| sum / avg / min / max | ✅ | ✅ |
+| percentile (p50/p95/p99) | ❌ | ✅ |
+| cardinality (DISTINCT) | ❌ | ✅ |
+| formula / bucket_script | ❌ | ✅ |
+| GUI 친화도 | △ 일부 | ✅ Kibana Stack Mgmt |
+| Continuous mode | ❌ batch only | ✅ 점진 갱신 |
+| 결과 조회 API | `_rollup_search` 전용 | 일반 `_search` |
+| ES 8.x 상태 | **deprecated** | ✅ 권장 |
+| ES 9.x | **제거됨** | ✅ 유지 |
+
+#### 학습 가치
+
+- 신규 시스템: **Rollup 사용하지 마**. Transform 으로
+- 레거시 마이그: 기존 Rollup job 을 Transform 으로 다시 정의 (계산 결과 동일 + percentile 추가 가능)
+- 면접/이론 학습 정도
+
+#### Java 비유 종합
+
+| ES 개념 | Java 생태계 비유 | 비고 |
+|---|---|---|
+| **Index** | DB Table, JPA `@Entity` | row = document |
+| **Mapping** | DB schema (DDL) | `@Column(columnDefinition=...)` |
+| **Document** | Row, JPA Entity 인스턴스 | `_source` = 직렬화된 JSON |
+| **Data View (Kibana)** | JPA Repository scope 또는 SQL VIEW | 여러 인덱스 묶기 |
+| **Field** | Column | dotted path (`data.header.x`) |
+| **Aggregation** | JPQL `GROUP BY` + 집계 함수 | nested = 중첩 group by |
+| **Query DSL** | JPA Criteria API / QueryDSL | bool/filter/must = predicate 조합 |
+| **KQL** | Spring Data 메서드 명 (간단 query) | `findByServiceAndIsErrorTrue` |
+| **Transform** | **Spring Batch + Continuous streaming** | 사전 집계 ETL |
+| **Rollup** | **Spring Batch (단순 sum/avg 잡)** | legacy, 단순 시계열만 |
+| **Ingest Pipeline** | JPA `@PrePersist` EntityListener | doc 받기 전 변환 |
+| **Runtime field** | Hibernate `@Formula` (계산 컬럼) | search-time 계산 |
+| **ILM Policy** | DB partition + 자동 archive 잡 | hot/warm/cold 라이프사이클 |
+| **Reindex** | JPA + Spring Batch 데이터 마이그 | 인덱스 통째 복사 + 변환 |
+| **Alias** | DB synonym 또는 view | 가상 핸들 |
+| **Snapshot** | DB dump (`expdp` / `pg_dump`) | S3/disk 저장 |
+| **Watcher / Alerts** | Spring Boot `@Scheduled` + Slack notifier | cron + alert 발송 |
+| **Dashboard** | Spring Actuator + Grafana | 시각화 |
+
+### 문서 보강
+- ✅ 본 99-qna 에 정식 등록
+- ✅ [99-oracle-to-es.md](99-oracle-to-es.md) 에 Java 생태계 매핑 부록 추가 권장
+- ✅ [07-batch-transform.md](07-batch-transform.md) Rollup 섹션 보강 권장
+
+---
+
 ## (이후 등록될 Q 자리)
 
 학습 진행하시며 막히는 지점 알려 주시면 여기에 추가합니다.

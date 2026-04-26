@@ -104,24 +104,41 @@ flowchart LR
 
 **핵심 통찰**: `is_error` 가 indexed → **08 의 Phase 1.5 상태 (에러율 KPI 즉시 가능)**. 따라서 본 문서의 25 지표 중 90% 가 **현재 매핑만으로 즉시 구현 가능**. 일부 깊은 도메인 분석 (어떤 거래액에서 에러가 많은가 등) 은 [08 Phase 2~3](08-card-platform-payload-strategy.md) 적용 후.
 
-### 1.2.1 ML Job 제외 전략 (라이선스·비용 회피)
+### 1.2.1 ML Job 전략 — Basic 학습 vs Platinum 운영
 
+**본 학습 환경 (Basic 라이선스)**:
 ```
 ✅ ES 8.x 기본 기능만 — Lens · TSVB · Aggregation · Transform · Threshold Alerts
 ❌ ML Anomaly Detection (Platinum 라이선스 필요)
 ❌ Watcher 고급 기능 일부 (Gold+ 필요)
 ```
 
-**왜**:
-- 폐쇄망 라이선스 단가 ↑ + 라이선스 갱신 부담
-- 30+ 지표 모두 ML 없이 **bucket_script + percentile + transform** 으로 구현 가능
-- 트래픽 anomaly detection 도 "지난주 평균 대비 ±X% 임계" 단순 룰로 충분
+**왜 Basic 만으로 충분**:
+- 30+ 지표 모두 **bucket_script + percentile + transform** 으로 구현 가능
+- 트래픽 anomaly 도 "지난주 평균 대비 ±X% 임계" 단순 룰 (M-O5) 로 충분
+- 라이선스 비용 회피, 인프라 부담 적음
 
-**ML 이 진짜 필요한 케이스 (참고)**:
-- 시간대 / 요일 자연 패턴이 매우 복잡 (예: 의료/금융 결산일 spike)
-- 단순 임계로는 false-positive 가 많아 운영 부담 ↑
+> 💎 **Platinum+ 사내 운영 환경에서는 다음 추가 활용** (지식 학습용 — 본 환경에선 실습 불가):
+>
+> | 기능 | 본 09 전략 어디에 적용? | 가치 |
+> |---|---|---|
+> | **ML Anomaly Detection** | M-O5 (DoD/WoW) 임계 룰 → ML Job 으로 대체 | 시간대×요일 자연 패턴 학습. false-positive ~70%↓ |
+> | **Searchable Snapshots** | §6.6 ILM Cold/Frozen tier | object storage(S3) 에 저장 → 90일 보존 비용 ~90%↓ |
+> | **Cross-Cluster Replication** | 다중 데이터센터 운영 시 | DR (Disaster Recovery), Active-Active |
+> | **Field-level Security** | data.body PII 차폐 | 인덱스 안에서 사용자 role 별 필드 차폐 (compliance) |
+> | **Document-level Security** | MSA 별 권한 분리 | row-level 권한 (예: 부서/팀별) |
+> | **Auditing** | 누가 언제 query 했는지 | 컴플라이언스 감사 |
+> | **Reporting (PDF)** Gold+ | D-K1 주간 KPI | dashboard PDF 자동 메일 |
+>
+> 자세한 내용 + 인프라 부담 → [99-qna Q-03 / Q-04](99-qna.md#q-03-platinum-라이선스가-있다면-어디까지-추가-활용-가능)
 
-→ **본 문서 모든 지표는 ML 미사용 으로 100% 구현 가능**.
+**ML 도입 시 고려 (Platinum)**:
+- 인프라 — dedicated ML 노드 1~2개 (16GB+ RAM each) 권장
+- Job 1개당 heap 100MB ~ 4GB
+- 14일+ baseline 학습 후 효과
+- 자세한 sizing → [99-qna Q-04](99-qna.md#q-04-ml-anomaly-detection-이-인프라-자원-많이-필요한가)
+
+→ **본 문서 모든 지표는 ML 미사용 으로 100% 구현 가능**. Platinum 도입 시 어디를 강화할지는 위 박스 참고.
 
 ### 1.2.2 Transform 사전 집계 — query 부하 70%↓
 
