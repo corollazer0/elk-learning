@@ -377,4 +377,4 @@ Rollup 사용 중 → 9.x 가기 전 Transform 으로 미리 마이그 필수
 
 이 문서가 학습 가이드의 마지막 reference. **운영 1주차 회고** + 임계 조정 + 팀 공유로 학습 사이클 마무리.
 
-[← README](README.md)
+[← README](index.md)

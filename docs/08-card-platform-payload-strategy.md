@@ -1065,4 +1065,4 @@ Phase 4 (Quarter)      App SDK + 표준 schema
 - Phase 3 시 매핑·index template 은 [06-index-management.md](06-index-management.md)
 - Phase 3 의 일일 통계 인덱스는 [07-batch-transform.md](07-batch-transform.md)
 
-[← README](README.md)
+[← README](index.md)
