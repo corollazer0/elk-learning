@@ -5,7 +5,7 @@ repo_url: https://github.com/corollazer0/elk-learning
 repo_name: corollazer0/elk-learning
 edit_uri: edit/main/
 
-docs_dir: .
+docs_dir: docs
 site_dir: _site
 
 theme:
@@ -80,7 +80,7 @@ plugins:
         - en
 
 nav:
-  - Home: README.md
+  - Home: index.md
   - 🟡 Phase A — 기반:
       - "00. 사전 준비": 00-prerequisites.md
       - "00b. Kibana 사이드바 길잡이": 00b-kibana-sidebar.md
