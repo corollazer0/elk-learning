@@ -1,0 +1,112 @@
+site_name: ES 실무 학습 가이드
+site_description: Elasticsearch + Kibana 실무 학습 커리큘럼 — Quick Win 부터 운영 자동화까지
+site_url: https://corollazer0.github.io/elk-learning/
+repo_url: https://github.com/corollazer0/elk-learning
+repo_name: corollazer0/elk-learning
+edit_uri: edit/main/
+
+docs_dir: .
+site_dir: _site
+
+theme:
+  name: material
+  language: ko
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 다크모드로
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 라이트모드로
+  font:
+    text: Noto Sans KR
+    code: JetBrains Mono
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.tabs.link
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: 이 섹션 링크
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search:
+      lang:
+        - ko
+        - en
+
+nav:
+  - Home: README.md
+  - 🟡 Phase A — 기반:
+      - "00. 사전 준비": 00-prerequisites.md
+      - "00b. Kibana 사이드바 길잡이": 00b-kibana-sidebar.md
+      - "Oracle SQL ↔ ES 매핑": 99-oracle-to-es.md
+  - 🟢 Phase B — Quick Win + 시각화:
+      - "01. Quick Win — 30분 첫 dashboard": 01-quickwin.md
+      - "02. Lens 시각화 8종 레시피": 02-lens-charts.md
+      - "03. Dashboard 3종 조립": 03-dashboards.md
+  - 🔴 Phase C — 운영 / 실무:
+      - "04. Alerts (알람 룰)": 04-alerts.md
+      - "05. KPI · painPoint · 가치 환산": 05-kpi-scenarios.md
+      - "06. Index / Field 생성·수정": 06-index-management.md
+  - 🟣 Phase D — 자동화:
+      - "07. 일일 배치 통계 인덱스 (Transform / Rollup / cron)": 07-batch-transform.md
+      - "08. Payload unindexed 환경 4-Phase 전략": 08-card-platform-payload-strategy.md
+  - 📚 Reference:
+      - "ES 8 vs 9 비교": 99-es-version-comparison.md
+      - "KQL 한 페이지 cheatsheet": 99-kql-cheatsheet.md
+      - "Troubleshooting": 99-troubleshooting.md
+      - "Q&A (학습 핑퐁 기록)": 99-qna.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/corollazer0/elk-learning
+  generator: false
+
+copyright: |
+  &copy; 2026 ES 실무 학습 가이드 — MIT License
