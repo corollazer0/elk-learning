@@ -1,4 +1,25 @@
-# MSA 11개 서버 Observability 설계 문서  
+# 09-a. 원안 (Grok) — MSA 11개 서버 Observability 설계 (참고)
+
+> ⚠️ **이 문서는 원안 (Grok 작성) 의 보존 사본**.
+> **메인 가이드**: [09. MSA 11서버 종합 KPI · 관측성 · Metric 전략](09-monitoring-strategy.md) 으로 통합되었습니다.
+>
+> **메인 09 문서가 흡수한 unique 내용**:
+> - ML Job 제외 전략 (Platinum 라이선스 회피)
+> - Transform 사전 집계 (query 부하 70%↓) — 메인 §1.2.2 + §3.6
+> - HTTP 4xx vs 5xx Ratio (M-S6), Slow Request Rate (M-S7)
+> - Service별 Outgoing Call Success Rate (M-P8), Instance Error Rate (M-P9)
+> - DoD/WoW Traffic Change (M-O5), Peak RPS (M-O6)
+> - 운영 매트릭스 한 페이지 표 — 메인 §5.0
+> - ILM 정책 7d/30d/90d — 메인 §6.6
+> - Kibana Spaces 분리 (SRE/Dev/Executive/Platform) — 메인 §6.7
+> - Lens 패널 구체 정의 — 메인 부록 A
+> - Watcher 룰 JSON 예시 — 메인 부록 B
+>
+> **본 원안의 가치**: 더 압축된 5 dashboard 분류 + 21 지표 매트릭스 표. 통합 문서가 30 지표 / 7 dashboard 로 확장됐지만, 빠른 overview 가 필요하면 본 원안을 먼저 훑는 것도 OK.
+
+---
+
+# MSA 11개 서버 Observability 설계 문서 (원안)
 **Kibana 대시보드 + KPI + Alerting Rule 완전 가이드**  
 (ES 8.x 버전 기준, ML Job 완전 제외, 1억 docs/day 환경)
 

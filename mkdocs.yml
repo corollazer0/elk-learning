@@ -97,6 +97,7 @@ nav:
       - "07. 일일 배치 통계 인덱스 (Transform / Rollup / cron)": 07-batch-transform.md
       - "08. Payload unindexed 환경 4-Phase 전략": 08-card-platform-payload-strategy.md
       - "09. MSA 11서버 종합 KPI · 관측성 · 알림 전략": 09-monitoring-strategy.md
+      - "09a. 원안 (Grok) — 참고": 09-a-grok-monotoring-strategy.md
   - 📚 Reference:
       - "ES 8 vs 9 비교": 99-es-version-comparison.md
       - "KQL 한 페이지 cheatsheet": 99-kql-cheatsheet.md

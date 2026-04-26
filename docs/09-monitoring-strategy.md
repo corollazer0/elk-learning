@@ -1,9 +1,11 @@
 # 09. MSA 11서버 종합 KPI · 관측성 · Metric 전략
 
 > **컨텍스트**: 백엔드 플랫폼 운영. 11 MSA, Filter/Interceptor 가 in/out 별도 doc 으로 ES 적재. **1억 docs/일** (in/out 합산).
-> **제약**: `data.body` (실 전문) **unindexed**. `data.header` 일부도 동일. 그러나 **api명, 정상여부, 에러코드, 거래id, @timestamp** 는 **indexed**.
-> **목표**: SRE / 백엔드 플랫폼 / 도메인 3관점에서 25 지표 선정 + 7 dashboard + P0/P1/Digest 알림. Google-scale 운영 표준.
+> **제약**: `data.body` (실 전문) **unindexed**. `data.header` 일부도 동일. 그러나 **api명, 정상여부, 에러코드, 거래id, @timestamp, instance_id** 는 **indexed**.
+> **목표**: SRE / 백엔드 플랫폼 / 도메인 3관점에서 30+ 지표 선정 + 7 dashboard + P0/P1/Digest 알림. Google-scale 운영 표준.
 > **선수**: [05-kpi-scenarios.md](05-kpi-scenarios.md) · [08-card-platform-payload-strategy.md](08-card-platform-payload-strategy.md)
+>
+> **본 문서는 [원안 (Grok 작성)](09-a-grok-monotoring-strategy.md) 의 unique 내용을 통합 보강한 결과**: ML 제외 전략 + Transform 사전 집계 (query 부하 70%↓) + HTTP 4xx/5xx 분리 + DoD/WoW 변화 + Instance 차원 + ILM 정책 + Kibana Space 운영 + 운영 매트릭스 한 페이지 표.
 
 ---
 
@@ -102,6 +104,61 @@ flowchart LR
 
 **핵심 통찰**: `is_error` 가 indexed → **08 의 Phase 1.5 상태 (에러율 KPI 즉시 가능)**. 따라서 본 문서의 25 지표 중 90% 가 **현재 매핑만으로 즉시 구현 가능**. 일부 깊은 도메인 분석 (어떤 거래액에서 에러가 많은가 등) 은 [08 Phase 2~3](08-card-platform-payload-strategy.md) 적용 후.
 
+### 1.2.1 ML Job 제외 전략 (라이선스·비용 회피)
+
+```
+✅ ES 8.x 기본 기능만 — Lens · TSVB · Aggregation · Transform · Threshold Alerts
+❌ ML Anomaly Detection (Platinum 라이선스 필요)
+❌ Watcher 고급 기능 일부 (Gold+ 필요)
+```
+
+**왜**:
+- 폐쇄망 라이선스 단가 ↑ + 라이선스 갱신 부담
+- 30+ 지표 모두 ML 없이 **bucket_script + percentile + transform** 으로 구현 가능
+- 트래픽 anomaly detection 도 "지난주 평균 대비 ±X% 임계" 단순 룰로 충분
+
+**ML 이 진짜 필요한 케이스 (참고)**:
+- 시간대 / 요일 자연 패턴이 매우 복잡 (예: 의료/금융 결산일 spike)
+- 단순 임계로는 false-positive 가 많아 운영 부담 ↑
+
+→ **본 문서 모든 지표는 ML 미사용 으로 100% 구현 가능**.
+
+### 1.2.2 Transform 사전 집계 — query 부하 70%↓
+
+**문제**: 1억 docs/일 raw 인덱스를 매번 dashboard 쿼리하면 → ES heap/CPU 압박, p95 latency 차트 1개에 30초+.
+
+**해결**: ES Transform 으로 **5분 단위 사전 집계 인덱스** 미리 만들기.
+
+```mermaid
+flowchart LR
+    Raw[("raw 인덱스<br/>api-logs-*<br/>~1억 docs/일")]
+    T1["Transform 1<br/>Latency 5min rollup"]
+    T2["Transform 2<br/>Error/Service rollup"]
+    T3["Transform 3<br/>API/Hour rollup"]
+    Pre1[("transform-latency-5m")]
+    Pre2[("transform-errors-5m")]
+    Pre3[("transform-api-1h")]
+    Dash[Dashboard]
+
+    Raw --> T1 --> Pre1
+    Raw --> T2 --> Pre2
+    Raw --> T3 --> Pre3
+    Pre1 --> Dash
+    Pre2 --> Dash
+    Pre3 --> Dash
+
+    style Pre1 fill:#c8e6c9
+    style Pre2 fill:#c8e6c9
+    style Pre3 fill:#c8e6c9
+```
+
+**효과**:
+- 실시간 dashboard query 대상 docs 수: **1억 → 약 30K** (5분 × 24h × 365 / agg dim)
+- query 부하: **약 70% 감소** (벤치 기준)
+- 추가 저장: **0.5~1%** (사전 집계는 raw 대비 압축률 매우 높음)
+
+→ §3.6 에 Transform 3개 구체 정의. [07-batch-transform.md](07-batch-transform.md) 도 참고.
+
 ### 1.3 in/out 짝짓기 — Latency 측정의 핵심
 
 ```mermaid
@@ -157,15 +214,17 @@ flowchart LR
 
 ## 3. 25 지표 카탈로그
 
-### 3.1 SRE 골든 시그널 (5)
+### 3.1 SRE 골든 시그널 (7)
 
 | # | 지표 | 정의 | 핵심 출처 | 권장 임계 |
 |---|---|---|---|---|
 | **M-S1** | **Availability** (가용성) | `count(is_error:false ∧ log_type:out) / count(log_type:out)` | is_error | ≥ 99.9% (SLO) |
-| **M-S2** | **Throughput / TPS** | `count(log_type:out) / window_seconds` | log_type | (capacity 기준 80%) |
+| **M-S2** | **Throughput / TPS / RPS** | `count(log_type:out) / window_seconds` | log_type | (capacity 기준 80%) |
 | **M-S3** | **Error Rate** | `count(is_error:true) / count(log_type:out)` | is_error | < 0.1% (= 1-SLO) |
 | **M-S4** | **Latency p50/p95/p99** | `(out.ts - in.ts) by trace_id` percentile | trace_id, @timestamp | p95<500ms, p99<2s |
 | **M-S5** | **Saturation** | host/MSA별 throughput max 대비 비율 | service_name, host | < 80% sustain |
+| **M-S6** | **4xx vs 5xx Ratio** | HTTP status code 기반 client-error vs server-error 비율 | http_status (있을 시) 또는 error_code 그룹 | 5xx > 0.5% 시 알림 |
+| **M-S7** | **Slow Request Rate** | `count(elapsed_ms > 1000) / count(log_type:out)` | elapsed_ms | < 1% |
 
 #### M-S1 Availability 구현 (Lens Formula)
 
@@ -204,7 +263,7 @@ Lens:   percentile(elapsed_ms, [50, 95, 99]) by api_path
 }
 ```
 
-### 3.2 백엔드 / 플랫폼 (7)
+### 3.2 백엔드 / 플랫폼 (9)
 
 | # | 지표 | 정의 | 가치 |
 |---|---|---|---|
@@ -215,6 +274,8 @@ Lens:   percentile(elapsed_ms, [50, 95, 99]) by api_path
 | **M-P5** | **Top API by Traffic** | 호출 수 상위 20 | capacity·캐시 우선순위 |
 | **M-P6** | **Error Bursting API** | 에러 spike 가 큰 API top 10 | 즉시 대응 우선순위 |
 | **M-P7** | **Index Ingestion Lag** | `now() - max(@timestamp)` | 로그 지연 감지 (Kafka/Logstash 문제) |
+| **M-P8** | **Service별 Outgoing Call Success Rate** | downstream 호출 성공률 (caller=svc, callee=ext) | A 가 B 를 호출할 때 의존성 건강 |
+| **M-P9** | **Service별 Instance Error Rate** | `error / total by service_name + instance_id` | "1번 인스턴스만 에러 폭발" 같은 부분 장애 감지 |
 
 #### M-P1 MSA 헬스 매트릭스 (DSL)
 
@@ -309,7 +370,7 @@ GET api-logs-*/_search
 ```
 → 그 결과를 **7일 누적 코드 목록과 차집합** (application 측 또는 transform 으로 사전 계산).
 
-### 3.4 운영 / Capacity (4)
+### 3.4 운영 / Capacity (6)
 
 | # | 지표 | 정의 | 가치 |
 |---|---|---|---|
@@ -317,6 +378,8 @@ GET api-logs-*/_search
 | **M-O2** | **Day-of-Week** | 요일별 트래픽 | 주말/평일 차이 |
 | **M-O3** | **Dead API** | 24h 호출 0인 swagger 선언 path | 정리 후보 |
 | **M-O4** | **Shadow API** | swagger 미선언인데 호출되는 path | 보안/문서 누락 |
+| **M-O5** | **DoD / WoW Traffic Change %** | 어제 대비, 지난주 같은 요일 대비 변화율 | 비정상 트래픽 자동 감지 (ML 대안) |
+| **M-O6** | **Peak RPS + 발생 시간대** | 일/주 peak 값 + 그 시간 | capacity planning 기초 |
 
 ### 3.5 Operational Excellence (2)
 
@@ -325,7 +388,107 @@ GET api-logs-*/_search
 | **M-X1** | **Logging Pipeline Lag** | Kafka offset → ES 인덱싱 lag (sec) | 데이터 정합 |
 | **M-X2** | **Index Storage Health** | 일자별 인덱스 size, shard 수, replica | 용량/성능 사전 대응 |
 
-**총 25 지표** ✅
+**총 30 지표** ✅ (SRE 7 + 플랫폼 9 + 도메인 7 + 운영 6 + Op-Excellence 2 — 11 MSA × 1억 docs/일 환경 종합 커버)
+
+### 3.6 Transform 사전 집계 — 구체 정의 3개
+
+§1.2.2 의 query 부하 70%↓ 전략. Kibana → Stack Management → Transforms 또는 Dev Tools.
+
+#### Transform 1: Latency 5분 rollup (M-S4, M-S7, M-P4 용)
+
+```json
+PUT _transform/latency-5m
+{
+  "source": { "index": "api-logs-*" },
+  "dest": { "index": "transform-latency-5m" },
+  "pivot": {
+    "group_by": {
+      "ts":      { "date_histogram": { "field": "@timestamp", "calendar_interval": "5m", "time_zone": "Asia/Seoul" } },
+      "service": { "terms": { "field": "service_name" } },
+      "api":     { "terms": { "field": "api_path" } }
+    },
+    "aggregations": {
+      "p50":      { "percentiles": { "field": "elapsed_ms", "percents": [50] } },
+      "p95":      { "percentiles": { "field": "elapsed_ms", "percents": [95] } },
+      "p99":      { "percentiles": { "field": "elapsed_ms", "percents": [99] } },
+      "tps":      { "value_count": { "field": "trace_id" } },
+      "slow":     { "filter": { "range": { "elapsed_ms": { "gt": 1000 } } } }
+    }
+  },
+  "frequency": "5m",
+  "sync": { "time": { "field": "@timestamp", "delay": "60s" } }
+}
+```
+
+#### Transform 2: Error 5분 rollup (M-S1, M-S3, M-D1, M-P9 용)
+
+```json
+PUT _transform/errors-5m
+{
+  "source": {
+    "index": "api-logs-*",
+    "query": { "term": { "log_type": "out" } }
+  },
+  "dest": { "index": "transform-errors-5m" },
+  "pivot": {
+    "group_by": {
+      "ts":          { "date_histogram": { "field": "@timestamp", "calendar_interval": "5m" } },
+      "service":     { "terms": { "field": "service_name" } },
+      "instance":    { "terms": { "field": "instance_id", "missing_bucket": true } },
+      "error_code":  { "terms": { "field": "error_code", "missing_bucket": true } }
+    },
+    "aggregations": {
+      "total":  { "value_count": { "field": "@timestamp" } },
+      "errors": { "filter": { "term": { "is_error": true } } },
+      "rate":   {
+        "bucket_script": {
+          "buckets_path": { "ok": "total", "err": "errors._count" },
+          "script": "params.err / params.ok"
+        }
+      }
+    }
+  },
+  "frequency": "5m",
+  "sync": { "time": { "field": "@timestamp", "delay": "60s" } }
+}
+```
+
+#### Transform 3: API/시간 1시간 rollup (M-P5, M-O1, M-O2, M-O5 용)
+
+```json
+PUT _transform/api-1h
+{
+  "source": { "index": "api-logs-*" },
+  "dest": { "index": "transform-api-1h" },
+  "pivot": {
+    "group_by": {
+      "ts":      { "date_histogram": { "field": "@timestamp", "calendar_interval": "1h", "time_zone": "Asia/Seoul" } },
+      "service": { "terms": { "field": "service_name" } },
+      "api":     { "terms": { "field": "api_path" } },
+      "method":  { "terms": { "field": "http_method", "missing_bucket": true } }
+    },
+    "aggregations": {
+      "calls":  { "value_count": { "field": "@timestamp" } },
+      "errors": { "filter": { "term": { "is_error": true } } },
+      "unique_traces": { "cardinality": { "field": "trace_id" } }
+    }
+  },
+  "frequency": "1h",
+  "sync": { "time": { "field": "@timestamp", "delay": "5m" } }
+}
+```
+
+#### 시작 + 검증
+
+```
+POST _transform/latency-5m/_start
+POST _transform/errors-5m/_start
+POST _transform/api-1h/_start
+
+GET _transform/latency-5m/_stats
+```
+
+dashboard 의 data view 를 raw `api-logs-*` 가 아니라 `transform-*` 로 가리키면 query 가 30K docs 수준으로 가벼워짐.
 
 ---
 
@@ -374,7 +537,39 @@ P0 우선순위:
 
 ## 5. Dashboard 7종
 
-### 5.0 Dashboard 분류 한눈에
+### 5.0 운영 매트릭스 — Dashboard × 지표 × Alert × 채널 한 페이지
+
+```
+┌────────────────────────────┬──────────────────────────┬─────────────────────────────────┬────────────┐
+│ Dashboard                  │ 포함 지표                 │ Alerting 룰 (요약)              │ 알림 채널   │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-RT1 SRE Golden Signals  │ M-S1, S2, S3, S4, S6, S7 │ Error rate >1% (5m)             │ PagerDuty  │
+│  (실시간, 30s refresh)      │                          │ p95 >800ms (5m) Critical        │  + Slack   │
+│                            │                          │ Error budget burn >50% (1h)      │            │
+│                            │                          │ RPS drop >30% (15m)              │            │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-RT2 MSA Health Matrix   │ M-P1, P9 + 11 MSA × 4 KPI│ MSA error rate >2% (10m)         │ Slack      │
+│  (실시간)                   │                          │ MSA p95 > SLO (10m) High         │  + Email   │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-RT3 거래 추적             │ M-P2, P3, P4             │ Stuck >100 (10m)                 │ Slack      │
+│  (실시간)                   │                          │ In/Out imbalance >5%             │            │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-D1 일일 점검              │ M-D1,D4 / M-O3,O4 / M-P5 │ DoD traffic ±40% (일일)           │ Email      │
+│  (매일 09:00)               │ M-S1 어제                 │ Error budget consumption >30%    │  Digest    │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-D2 도메인 에러 분석       │ M-D1, D2, D3, D4         │ 특정 코드 Top1 >500건 (15m)       │ Slack      │
+│  (drill-down)              │                          │ 5xx ratio >0.5% (15m)            │            │
+│                            │                          │ Trace completion rate <98%       │            │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-K1 주간 KPI 보고          │ M-S1, M-D5, M-D6, M-O1   │ 매주 월 09:00 자동 발송            │ Email      │
+│                            │ M-O2, Error budget       │  + 매니저 보고                    │  주간      │
+├────────────────────────────┼──────────────────────────┼─────────────────────────────────┼────────────┤
+│ D-O1 인덱스 헬스             │ M-X1, X2, M-P7           │ Ingestion lag >5m (P0)           │ Slack      │
+│                            │                          │ Index size 평소 +20% (15m)        │  + DBA     │
+└────────────────────────────┴──────────────────────────┴─────────────────────────────────┴────────────┘
+```
+
+### 5.0.1 Dashboard 분류 한눈에
 
 ```mermaid
 flowchart LR
@@ -815,6 +1010,94 @@ flowchart LR
 
 ---
 
+## 6.6 ILM 정책 — 데이터 보존 + 비용
+
+1억 docs/일 × 90일 = 90억 docs → ILM 으로 자동 라이프사이클 관리 필수.
+
+```json
+PUT _ilm/policy/api-logs-policy
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "set_priority": { "priority": 100 },
+          "rollover": {
+            "max_age": "1d",
+            "max_primary_shard_size": "50gb"
+          }
+        }
+      },
+      "warm": {
+        "min_age": "7d",
+        "actions": {
+          "set_priority": { "priority": 50 },
+          "shrink": { "number_of_shards": 1 },
+          "forcemerge": { "max_num_segments": 1 },
+          "allocate": { "include": { "data": "warm" } }
+        }
+      },
+      "cold": {
+        "min_age": "30d",
+        "actions": {
+          "set_priority": { "priority": 0 },
+          "allocate": { "include": { "data": "cold" } }
+        }
+      },
+      "delete": {
+        "min_age": "90d",
+        "actions": { "delete": {} }
+      }
+    }
+  }
+}
+```
+
+| Phase | 기간 | 용도 | 데이터 위치 |
+|-------|----|----|-----|
+| **HOT**  | 0~7일  | 활발 read+write (실시간 dashboard, 에러 진단) | SSD, 빠른 노드 |
+| **WARM** | 7~30일 | 읽기 위주 (D-K1 주간 KPI, 회귀 분석) | shrink + merge, 보통 노드 |
+| **COLD** | 30~90일 | 가끔 조회 (월간 보고, 사후 분석) | 저비용 노드 / searchable snapshot |
+| **DELETE** | 90일+ | 자동 삭제 | (압축 보관 정책 따라) |
+
+> **transform 인덱스는 별도 정책** — 사전 집계니 1년+ 보존 가능 (저장 비용 매우 적음).
+
+## 6.7 Kibana Spaces — 권한 분리
+
+11 MSA + 다양한 청중 (SRE / 개발 / PM / DBA) → Kibana Space 로 시야 분리.
+
+```mermaid
+flowchart TD
+    subgraph Spaces["Kibana Spaces 분리"]
+      SRE["🔴 SRE Space<br/>(on-call)"]
+      DEV["🟢 Dev Space<br/>(서비스팀)"]
+      EXEC["🟣 Executive Space<br/>(임원/PM)"]
+      DBA["🟡 Platform Space<br/>(DBA/플랫폼)"]
+    end
+
+    SRE --> D1[D-RT1, D-RT2, D-RT3]
+    SRE --> D2[D-D1, D-D2]
+    DEV --> D2
+    DEV --> D3[서비스별 dashboard]
+    EXEC --> D4[D-K1 주간 KPI]
+    DBA --> D5[D-O1 인덱스 헬스]
+
+    style SRE fill:#ffcdd2
+    style DEV fill:#c8e6c9
+    style EXEC fill:#e1bee7
+    style DBA fill:#fff3e0
+```
+
+| Space | 청중 | 보이는 dashboard | 추가 권한 |
+|-------|----|----|----|
+| **SRE** | on-call, SRE 리드 | D-RT1, D-RT2, D-RT3, D-D1, D-D2 | Alert 관리, runbook 편집 |
+| **Dev (per service)** | 각 서비스 팀 | 본인 서비스 dashboard, D-D2 | 본인 서비스 인덱스 한정 |
+| **Executive** | 임원, PM | D-K1 만 | read-only |
+| **Platform** | DBA, ES 운영자 | D-O1 + Stack Management | 인덱스/transform/ILM 관리 |
+
+설정: Stack Management → Spaces → Create. 각 space 의 features 토글로 보이는 메뉴 제한 가능.
+
 ## 7. 운영 절차
 
 ### 7.1 Daily — 운영자 09:00 루틴
@@ -1004,3 +1287,184 @@ flowchart LR
 - 일일 통계 인덱스 자동화 → [07-batch-transform.md](07-batch-transform.md)
 - payload unindexed 환경에서의 KPI 회복 → [08-card-platform-payload-strategy.md](08-card-platform-payload-strategy.md)
 - 알람 룰 셋업 상세 → [04-alerts.md](04-alerts.md)
+
+---
+
+## 부록 A. Lens 패널 구체 정의 (Real-time Global Overview 핵심)
+
+### Lens A1: RPS (Time Series)
+
+```
+Type:           Line / Area
+Horizontal:     Date Histogram (@timestamp, 5m bucket, time_zone Asia/Seoul)
+Vertical:       Unique count(trace_id) / 300    ← 5분 = 300초
+Filter:         service_name : * (Control 로 동적)
+Source:         transform-latency-5m (사전 집계 인덱스)
+```
+
+### Lens A2: Error Rate (%)
+
+```
+Type:           Line
+Horizontal:     Date Histogram (@timestamp, 5m)
+Vertical:       Formula:
+                count(kql='is_error:true') / count()
+                Format: Percent
+Source:         transform-errors-5m
+```
+
+### Lens A3: P95 Latency
+
+```
+Type:           Line (multi-metric)
+Horizontal:     Date Histogram (@timestamp, 5m)
+Vertical:       Percentile(elapsed_ms, 95) / Median / Percentile 99
+Filter:         log_type : "out"
+Source:         transform-latency-5m  ← 매번 raw 1억 docs 안 봐도 됨
+```
+
+### Lens A4: 4xx vs 5xx Ratio (M-S6)
+
+```
+Type:           Donut 또는 Stacked area over time
+Slice:          Filter ratio, 분류:
+                - 4xx: error_code 가 "4xx*" 또는 http_status: [400 to 499]
+                - 5xx: error_code 가 "5xx*" 또는 http_status: [500 to 599]
+                - success: is_error: false
+```
+
+> 우리 환경에 `http_status` 필드가 없으면 application 측 수정 (filter 에서 추출) 또는 error_code prefix 약속 필요.
+
+---
+
+## 부록 B. Watcher / Alerting Rule Query 예시
+
+### B1. Error Rate Threshold (P0)
+
+```json
+PUT _watcher/watch/error-rate-p0
+{
+  "trigger": { "schedule": { "interval": "1m" } },
+  "input": {
+    "search": {
+      "request": {
+        "indices": ["transform-errors-5m"],
+        "body": {
+          "size": 0,
+          "query": { "range": { "ts": { "gte": "now-5m" } } },
+          "aggs": {
+            "agg_total":  { "sum": { "field": "total" } },
+            "agg_errors": { "sum": { "field": "errors._count" } },
+            "rate": {
+              "bucket_script": {
+                "buckets_path": { "ok": "agg_total", "err": "agg_errors" },
+                "script": "params.err / Math.max(params.ok, 1)"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": { "ctx.payload.aggregations.rate.value": { "gt": 0.01 } }
+  },
+  "actions": {
+    "notify-pagerduty": {
+      "webhook": {
+        "url": "https://events.pagerduty.com/v2/enqueue",
+        "body": "{ \"severity\":\"critical\", \"summary\":\"Error rate {{ctx.payload.aggregations.rate.value}}\" }"
+      }
+    }
+  }
+}
+```
+
+### B2. Stuck Requests (P1)
+
+```json
+GET transform-errors-5m/_search
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { "range": { "ts": { "gte": "now-10m" } } }
+      ]
+    }
+  },
+  "aggs": {
+    "stuck_total": {
+      "sum": { "field": "stuck_count" }   ← Transform 에 stuck 필드 추가 시
+    }
+  }
+}
+```
+
+> Stuck 정확 구현은 별도 transform 또는 application 단 (in 만 있고 timeout 후 out 없는 trace_id 카운트). raw 1억 docs anti-join 은 비효율.
+
+---
+
+## 부록 C. 통합 산출물 매트릭스 (한 페이지)
+
+```
+═══════════ 30 지표 × 7 Dashboard × Alert ═══════════
+
+SRE Golden Signals (7)
+  M-S1 Availability            → D-RT1, D-D1, D-K1  → R-P0-1
+  M-S2 TPS/RPS                 → D-RT1, D-D1        → R-P0-2 (RPS drop)
+  M-S3 Error Rate              → D-RT1, D-D2        → R-P0-2
+  M-S4 Latency p50/p95/p99    → D-RT1, D-D1        → R-P0-3
+  M-S5 Saturation              → D-RT1, D-O1        → (host metric)
+  M-S6 4xx vs 5xx Ratio        → D-D2               → R-P1-7 (5xx >0.5%)
+  M-S7 Slow Request Rate       → D-RT1, D-D2        → R-P1-8
+
+플랫폼 (9)
+  M-P1 MSA Health Matrix       → D-RT2              → R-P1-5
+  M-P2 In/Out Imbalance        → D-RT3              → R-P1-4
+  M-P3 Stuck Requests          → D-RT3              → R-P1-3
+  M-P4 Inter-Service Latency   → D-D2               → -
+  M-P5 Top API by Traffic      → D-D1               → -
+  M-P6 Error Bursting API      → D-D2               → R-P1-1
+  M-P7 Index Ingestion Lag     → D-O1               → R-P0-5
+  M-P8 Outgoing Call Success   → D-RT2              → R-P1-9
+  M-P9 Instance Error Rate     → D-RT2              → R-P1-10
+
+도메인 (7)
+  M-D1 Top Error Codes         → D-D1, D-D2         → R-P1-1 (Top1 spike)
+  M-D2 New Error Code          → D-D1, D-D2         → R-P1-2
+  M-D3 Critical API Error      → D-RT1, D-D2        → R-P0-2 (Critical)
+  M-D4 Error by MSA            → D-D2               → -
+  M-D5 거래 성공률              → D-K1               → digest
+  M-D6 DAU 추정 (cardinality)  → D-K1               → -
+  M-D7 Funnel Drop-off         → D-K1               → -
+
+운영 (6)
+  M-O1 Time-of-Day             → D-K1               → -
+  M-O2 Day-of-Week             → D-K1               → -
+  M-O3 Dead API                → D-D1               → digest
+  M-O4 Shadow API              → D-D1               → digest
+  M-O5 DoD/WoW Change          → D-K1               → R-P1-11 (>±40%)
+  M-O6 Peak RPS                → D-K1               → -
+
+Op-Excellence (2)
+  M-X1 Logging Pipeline Lag    → D-O1               → R-P0-5
+  M-X2 Index Storage Health    → D-O1               → R-P1-12 (size +20%)
+```
+
+→ 운영자가 "어느 dashboard 에서 어떤 지표를 보고 어떤 알람을 받는지" 한 페이지로 추적 가능.
+
+---
+
+## 부록 D. 다음 단계 추천 (Grok 원안 통합)
+
+1. **Transform 3개 즉시 생성** — 가장 큰 효과 (query 부하 70%↓)
+2. **D-RT1 Real-time Global Overview** dashboard 1개부터 제작
+3. **Alerting Rule 5개 P0 우선 등록** (Error rate, p95, 가용성, RPS drop, ingestion lag)
+4. **Critical API (결제·주문) 전용 Lens** 추가
+5. **ILM Policy 적용** — Hot 7일 → Warm 30일 → Delete 90일
+6. **Kibana Spaces 4개 분리** (SRE / Dev / Executive / Platform)
+7. **Latency 정합화** — application 단 elapsed_ms 적재 (filter/interceptor 수정)
+8. **Daily Digest 자동 메일 셋업**
+
+이 8단계로 **2주 내 production-grade 관측성** 확보 가능.
