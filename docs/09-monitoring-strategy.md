@@ -1473,15 +1473,725 @@ Op-Excellence (2)
 
 ---
 
-## 부록 D. 다음 단계 추천 (Grok 원안 통합)
+## 부록 D. 8단계 셋업 — 2주 production-grade 관측성
 
-1. **Transform 3개 즉시 생성** — 가장 큰 효과 (query 부하 70%↓)
-2. **D-RT1 Real-time Global Overview** dashboard 1개부터 제작
-3. **Alerting Rule 5개 P0 우선 등록** (Error rate, p95, 가용성, RPS drop, ingestion lag)
-4. **Critical API (결제·주문) 전용 Lens** 추가
-5. **ILM Policy 적용** — Hot 7일 → Warm 30일 → Delete 90일
-6. **Kibana Spaces 4개 분리** (SRE / Dev / Executive / Platform)
-7. **Latency 정합화** — application 단 elapsed_ms 적재 (filter/interceptor 수정)
-8. **Daily Digest 자동 메일 셋업**
+### D.0 전체 Timeline
 
-이 8단계로 **2주 내 production-grade 관측성** 확보 가능.
+```mermaid
+gantt
+    title 11 MSA 1억docs/일 — 2주 셋업 로드맵
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d (%a)
+
+    section 🟡 Week 1 — 인프라
+    Step 1 Transform 3개         :s1, 2026-04-27, 2d
+    Step 2 D-RT1 Dashboard       :s2, after s1, 2d
+    Step 3 P0 Alert 5개          :s3, after s2, 2d
+    Step 4 Critical API Lens     :s4, after s3, 1d
+
+    section 🟢 Week 2 — 운영화
+    Step 5 ILM Policy            :s5, after s4, 1d
+    Step 6 Kibana Spaces 분리    :s6, after s5, 1d
+    Step 7 Latency 정합화 (협업) :crit, s7, 2026-04-27, 8d
+    Step 8 Daily Digest          :s8, after s6, 1d
+
+    section 🔴 Week 3 — 회고
+    운영 회고 + 임계 조정         :s9, after s8, 3d
+```
+
+> 💡 **병렬 가능**: Step 7 (Latency 정합화) 은 application 팀 협업이라 별도 트랙. Step 1~6, 8 은 ES/Kibana 측 단독 작업. 동시 진행.
+
+### D.1 Step 1 — Transform 3개 즉시 생성 (Day 1~2)
+
+#### 목표
+1억 docs/일의 raw 인덱스 위 dashboard query 가 30초+ 걸리는 것을 0.X초로 줄임. **가장 큰 효과**.
+
+#### 사전 조건
+- ES 8.x 클러스터 + write 권한
+- `manage_ingest_pipelines`, `manage_transform`, `manage_index_templates` 클러스터 권한
+- raw 인덱스 매핑에 `service_name`, `api_path`, `is_error`, `elapsed_ms`, `trace_id` keyword 형 확인
+
+#### 절차
+
+##### D.1.1 결과 인덱스 매핑 미리 박기 (Index Template)
+
+```json
+PUT _index_template/transform-monitoring-template
+{
+  "index_patterns": ["transform-latency-5m", "transform-errors-5m", "transform-api-1h"],
+  "priority": 200,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "transform-stats-policy"
+    },
+    "mappings": {
+      "properties": {
+        "ts":             { "type": "date" },
+        "service_name":   { "type": "keyword" },
+        "api_path":       { "type": "keyword" },
+        "instance_id":    { "type": "keyword" },
+        "error_code":     { "type": "keyword" },
+        "calls":          { "type": "long" },
+        "errors":         { "type": "long" },
+        "rate":           { "type": "float" },
+        "p50":            { "type": "float" },
+        "p95":            { "type": "float" },
+        "p99":            { "type": "float" },
+        "unique_traces":  { "type": "long" }
+      }
+    }
+  }
+}
+```
+
+##### D.1.2 Transform 3개 등록
+
+[§3.6](#36-transform-사전-집계--구체-정의-3개) 의 JSON 그대로 PUT.
+
+##### D.1.3 시작 + 즉시 검증
+
+```
+POST _transform/latency-5m/_start
+POST _transform/errors-5m/_start
+POST _transform/api-1h/_start
+
+# 30초 후 확인
+GET _transform/latency-5m/_stats
+```
+
+응답 `state: "started"`, `pages_processed > 0`, `documents_indexed > 0` 면 정상.
+
+##### D.1.4 사이트 query 재라우팅
+
+기존 dashboard 의 data view 가 `api-logs-*` 를 가리켰다면, 일부 패널을 `transform-*` 로 변경. 방법:
+- 새 Data view `transform-monitoring` (패턴: `transform-*`) 생성
+- D-RT1 의 latency / error rate 패널 우상단 ⋮ → Edit → data view 교체
+
+#### 검증
+
+- ✅ `transform-latency-5m` 인덱스에 5분 후 docs 적재
+- ✅ 같은 dashboard 의 latency 차트 응답 30초 → 0.5초 확인
+- ✅ `_transform/_stats` 의 `health: green`
+
+#### 시간 / 함정
+
+- 소요: **2일** (1일 등록 + 1일 검증)
+- 함정 1: source 매핑이 dynamic 이라 elapsed_ms 가 text 면 percentile 실패 → keyword/long 으로 매핑 명시
+- 함정 2: continuous mode 는 `sync.delay` 가 너무 짧으면 late-arriving doc 누락 → 60s 권장
+- 함정 3: cardinality 큰 group_by (예: trace_id) 직접 group → ES heap 부담. 5분 bucket × service × api 정도가 안전
+
+---
+
+### D.2 Step 2 — D-RT1 Real-time Global Overview (Day 3~4)
+
+#### 목표
+on-call 이 매 시간 한 번 슬쩍 보면 정상 여부 1초 안에 판단할 수 있는 dashboard.
+
+#### 사전 조건
+- Step 1 의 Transform 3개 active
+- Data view `transform-monitoring` 생성됨
+
+#### 절차
+
+##### D.2.1 KPI 패널 4개
+
+≡ → Analytics → Dashboard → Create dashboard → Add new visualization → Lens.
+
+각 KPI 별로:
+
+**KPI 1 — Availability**
+```
+Type:           Metric
+Data view:      transform-errors-5m
+Primary metric: Formula
+  1 - (sum(errors) / sum(calls))
+Format:         Percent (decimals: 3)
+Conditional formatting:
+  >= 0.999: green
+  0.99~0.999: amber
+  < 0.99: red
+Title: "🟢 Availability"
+```
+
+**KPI 2 — Error Rate**: 위와 비슷, formula 가 `sum(errors) / sum(calls)`. 임계 반대로 (낮을수록 좋음).
+
+**KPI 3 — p95 Latency**: data view `transform-latency-5m`, metric `avg(p95)` (5분 bucket 의 p95 평균).
+
+**KPI 4 — TPS**: `sum(calls) / 300` (5분=300초).
+
+##### D.2.2 Trend 패널 3개
+
+- **Availability % trend**: Line chart, X=ts, Y=Formula, 1h window
+- **TPS by MSA**: Stacked area, X=ts, Y=sum(calls)/300, breakdown=service_name
+- **Latency trend**: Line, multi-metric (p50/p95/p99)
+
+##### D.2.3 Active Alerts 패널
+
+Lens Markdown 또는 Alerts dashboard panel embed. 활성 알람 0 / 1 / 2 카운트 + 링크.
+
+##### D.2.4 Refresh 자동화
+
+상단 **Refresh every 30 seconds**.
+
+##### D.2.5 저장
+
+이름 `D-RT1 SRE Golden Signals`, description "on-call 1차 확인용".
+
+#### 검증
+
+- ✅ http://kibana/.../D-RT1 200 응답
+- ✅ KPI 4 모두 숫자 표시 (NaN 없음)
+- ✅ 30초마다 시간 인디케이터 갱신
+
+#### 시간 / 함정
+
+- 소요: **2일**
+- 함정 1: 임계 conditional 색상이 percent 단위 아닌 0~1 단위일 수 있음 → 매번 미리보기로 확인
+- 함정 2: Live (30s refresh) 시 패널 8개 넘으면 ES 부담 → 본 D-RT1 은 4 KPI + 3 trend = 7로 제한
+- 함정 3: 시간 피커 default 가 전체 dashboard 에 적용 — `Last 1 hour` 가 가장 자연스러움
+
+---
+
+### D.3 Step 3 — P0 Alerting Rule 5개 등록 (Day 5~6)
+
+#### 목표
+SRE 가 **새벽에 깨야 하는 진짜 위급** 5가지를 자동 감지·알림.
+
+#### 사전 조건
+- D-RT1 active (사람이 볼 수 있는 곳)
+- Slack / PagerDuty / Email connector 1개 이상 등록
+- Runbook URL 4개 이상 (각 룰별)
+
+#### 절차
+
+##### D.3.1 Connector 등록
+
+≡ → Stack Management → **Connectors** → Create.
+
+```
+Type: Slack (Webhook URL) 또는 PagerDuty (Routing key)
+이름: oncall-primary
+테스트 메시지 발송 → 도착 확인
+```
+
+##### D.3.2 P0 룰 5개 — 본 09 문서 §6.2 정의 기반
+
+```mermaid
+flowchart LR
+    R1[R-P0-1<br/>Availability <99%]
+    R2[R-P0-2<br/>Error Rate >5%]
+    R3[R-P0-3<br/>p95 >5s]
+    R4[R-P0-4<br/>MSA TPS=0]
+    R5[R-P0-5<br/>Ingestion lag >10m]
+    R1 & R2 & R3 & R4 & R5 --> PD[🚨 PagerDuty]
+    PD --> Page[📞 페이저 호출]
+
+    style R1 fill:#ffcdd2
+    style PD fill:#c62828,color:#fff
+```
+
+각 룰의 단계:
+
+1. ≡ → Observability → Alerts → **Manage rules** → Create rule
+2. Rule type: **Elasticsearch query**
+3. Index: `transform-errors-5m` (Step 1 결과)
+4. Time field: `ts`
+5. Query (예시 — R-P0-1):
+   ```
+   { "query": { "match_all": {} } }
+   ```
+6. Condition (Lens-style): **Custom Query Threshold**
+   - WHEN: count
+   - IS ABOVE: 0  (그냥 데이터 있는지 확인용 base)
+   - 또는 metric aggregation 으로 직접 정의
+
+> 💡 **고급**: Threshold rule 로 표현 어려우면 **Watcher** 사용. Q-04 또는 [부록 B](#부록-b-watcher--alerting-rule-query-예시) 의 JSON 참고.
+
+##### D.3.3 각 룰의 Action 템플릿
+
+```yaml
+PagerDuty:
+  Severity: critical
+  Summary: |
+    🚨 [{{rule.name}}]
+    Service: {{context.alerts.[0].service_name}}
+    Value: {{context.value}}
+    Time: {{date}}
+  Custom details:
+    runbook: https://wiki.example.com/runbooks/{{rule.id}}
+    dashboard: https://kibana/.../D-RT1
+```
+
+##### D.3.4 Runbook 작성
+
+각 룰별로 1페이지 runbook:
+- 첫 5분: 무엇을 확인 (D-RT1, D-RT2, D-D2 순서)
+- 가능한 원인 3가지
+- 즉각 대응 (예: 긴급 rollback, traffic 차단)
+- escalation (1시간 미해결 시)
+
+#### 검증
+
+- ✅ 일부러 임계 낮춰서 강제 트리거 → PagerDuty 알람 도착
+- ✅ Runbook URL 클릭 → 도착 (404 없음)
+- ✅ 임계 복원 → "resolved" 알림도 자동 도착
+
+#### 시간 / 함정
+
+- 소요: **2일** (룰 등록 0.5일 + 테스트/runbook 1.5일)
+- 함정 1: false-positive 시 alert fatigue → 1주 운영 후 임계 조정
+- 함정 2: cooldown 없으면 같은 사고에 50번 알람 → throttling 5min 설정
+- 함정 3: PagerDuty escalation chain 미설정 → on-call 부재 시 다른 사람 미호출 위험
+
+---
+
+### D.4 Step 4 — Critical API 전용 Lens 추가 (Day 7)
+
+#### 목표
+**결제, 인증, 이체 같은 비즈니스 핵심 API** 는 일반 KPI 와 별도로 전용 panel 로 강조.
+
+#### 정의 — Critical API 분류
+사내 합의 필요. 예시:
+- Tier 0 (즉시 영향): `/api/v1/payments/charge`, `/api/v1/users/auth`, `/api/v1/accounts/transfer`
+- Tier 1 (영업 영향): `/api/v1/cards/issue`, `/api/v1/payments/refund`
+- Tier 2 (운영 영향): 그 외
+
+#### 절차
+
+##### D.4.1 Critical API filter 정의
+
+```json
+{
+  "terms": {
+    "api_path": [
+      "/api/v1/payments/charge",
+      "/api/v1/users/auth",
+      "/api/v1/accounts/transfer"
+    ]
+  }
+}
+```
+
+##### D.4.2 D-RT1 에 Critical API 패널 추가
+
+```
+패널: Critical API 의 Availability + Error Rate (별도 Tier 0)
+Type: Lens Metric
+Filter: api_path : ("/api/v1/payments/charge" or "/api/v1/users/auth" or "/api/v1/accounts/transfer")
+```
+
+##### D.4.3 Critical API 전용 Alert (R-P0-2 강화)
+
+```
+Critical API error rate > 1% (5min window)
+→ Severity: critical
+→ Action: PagerDuty + Slack #ops + 도메인 리드 직접 호출
+```
+
+#### 시간 / 함정
+- 소요: **1일**
+- 함정 1: Tier 0 정의가 자주 변함 → saved query `critical-api-tier0` 로 모든 룰/dashboard 가 reference
+- 함정 2: Tier 0 만 보고 Tier 1 무시 → 별도 D-RT1.5 또는 D-D2 에 Tier 1 도 표시
+
+---
+
+### D.5 Step 5 — ILM Policy 적용 (Day 9)
+
+#### 목표
+1억 docs/일 × 90일 = 90억 docs 의 자동 라이프사이클. 사람이 손대지 않아도 cold/delete 자동.
+
+#### 사전 조건
+- ES cluster 가 hot/warm/cold tier node 분리 구성? (단일 노드면 phase 별 priority 만)
+- 보존 정책 합의 (90일? 180일?)
+
+#### 절차
+
+##### D.5.1 정책 등록 — §6.6 의 정책 그대로
+
+```json
+PUT _ilm/policy/api-logs-policy
+{ "policy": { "phases": { ... } } }
+```
+
+(정책 본문은 §6.6 참고)
+
+##### D.5.2 Index Template 에 적용
+
+```json
+PUT _index_template/api-logs-template
+{
+  "index_patterns": ["api-logs-*"],
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "api-logs-policy",
+      "index.lifecycle.rollover_alias": "api-logs-current"
+    }
+  }
+}
+```
+
+##### D.5.3 기존 인덱스에 적용
+
+```json
+PUT api-logs-*/_settings
+{ "index.lifecycle.name": "api-logs-policy" }
+```
+
+##### D.5.4 검증
+
+```
+GET api-logs-2026.04.20/_ilm/explain
+```
+응답에 `phase: "hot"`, `policy: "api-logs-policy"` 확인.
+
+#### 시간 / 함정
+- 소요: **1일** (등록은 30분, 검증 + 테스트가 시간)
+- 함정 1: tier node 분리 안 된 환경에서 `allocate.include.data: warm` 같은 phase 동작이 노드 부족으로 stuck → priority 만 사용
+- 함정 2: 운영 중인 인덱스에 갑자기 적용 → rollover 가 즉시 발동될 수 있음, **업무 시간 외 적용 권장**
+- 함정 3: snapshot 사전 백업 안 하면 delete phase 가 데이터 영구 삭제
+
+> 💎 **Platinum+**: cold/frozen tier 를 searchable snapshots 로 → object storage(S3) 비용 ~90%↓ ([Q-03](99-qna.md#q-03-platinum-라이선스가-있다면-어디까지-추가-활용-가능))
+
+---
+
+### D.6 Step 6 — Kibana Spaces 4개 분리 (Day 10~11)
+
+#### 목표
+SRE / Dev / Executive / Platform 4 청중에 맞게 **시야 격리**. 사고 시 잘못된 dashboard 편집 방지 + 임원에게 깨끗한 화면.
+
+#### 절차
+
+##### D.6.1 Space 4개 생성
+
+≡ → Stack Management → **Spaces** → Create.
+
+```
+Spaces:
+1. SRE          features: Discover, Dashboard, Alerts, Dev Tools
+2. Dev (per service)  features: Discover, Dashboard
+3. Executive    features: Dashboard 만 (다른 메뉴 hidden)
+4. Platform     features: Discover, Dashboard, Stack Mgmt, Dev Tools
+```
+
+##### D.6.2 Saved Object 복사
+
+기존 dashboard 들을 각 space 에 복사 (또는 share to spaces).
+
+```
+Stack Management → Saved Objects → 선택 → ⋮ → Share to space
+```
+
+| Space | 보이는 dashboard |
+|-------|----|
+| SRE | D-RT1, D-RT2, D-RT3, D-D1, D-D2 |
+| Dev | 본인 서비스 + D-D2 |
+| Executive | D-K1 |
+| Platform | D-O1 + Stack Management |
+
+##### D.6.3 Role 정의
+
+≡ → Stack Management → **Roles**:
+
+```
+Role: sre_user
+  Kibana spaces: SRE
+  Cluster: monitor
+  Indices: api-logs-*, transform-* (read)
+
+Role: dev_payment_user
+  Kibana spaces: Dev
+  Indices: api-logs-payment-*, transform-* (read)
+```
+
+> 💎 **Platinum+ Field-level / Document-level Security**: 같은 인덱스 안에서 Dev 가 PII 필드 못 보게 차폐. ([Q-03](99-qna.md#q-03-platinum-라이선스가-있다면-어디까지-추가-활용-가능))
+
+##### D.6.4 사용자 매핑
+
+각 사용자에게 적절한 role 부여. SSO/SAML 통합 시 group → role mapping.
+
+#### 검증
+- ✅ 임원 계정 로그인 → D-K1 만 보임, Discover/Dev Tools 안 보임
+- ✅ Dev (payment) 계정 → 결제 인덱스만 검색 가능
+- ✅ SRE 계정 → 모든 dashboard + alert 관리
+
+#### 시간 / 함정
+- 소요: **2일**
+- 함정 1: SSO 그룹 → role 매핑이 잘 안 되면 사용자 일일이 추가 부담 → 시작 시 SSO 설정 확인
+- 함정 2: Saved object share 안 하고 복사하면 원본 변경이 다른 space 반영 안 됨 → "Share to spaces" 권장 (single source of truth)
+
+---
+
+### D.7 Step 7 — Latency 정합화 (Week 1~2 병렬, application 협업)
+
+#### 목표
+in/out 매칭 latency 가 ES 만으로는 어려움. application 측에서 **`elapsed_ms` 를 out doc 에 직접 적재** 합의.
+
+#### Why
+- ES anti-join 부재 → trace_id 매칭이 ES 단독으로 비싼 연산
+- application 의 filter/interceptor 는 in→out 시간 차이를 자체적으로 알고 있음
+- 그 차이를 그냥 doc 에 박으면 → ES 는 단순 percentile 만 하면 됨
+
+#### 절차
+
+##### D.7.1 application 팀과 협의
+
+11 MSA 의 공통 logger 라이브러리 (예: NhPayLogger SDK) 에 다음 추가:
+
+```java
+// Filter / Interceptor 의 afterCompletion / postHandle
+long startedAt = (long) request.getAttribute("started_at");
+long elapsed = System.currentTimeMillis() - startedAt;
+
+logger.outLog(
+  Map.of(
+    "service_name", serviceName,
+    "api_path", request.getRequestURI(),
+    "trace_id", traceId,
+    "elapsed_ms", elapsed,           // ← 핵심 추가
+    "is_error", responseCode != 200,
+    "data", { header, body }
+  )
+);
+```
+
+##### D.7.2 ES 매핑 추가
+
+```json
+PUT api-logs-*/_mapping
+{
+  "properties": {
+    "elapsed_ms": { "type": "long" }
+  }
+}
+```
+
+##### D.7.3 신규 인덱스부터 적용 + 기존 데이터 처리
+
+| 옵션 | 설명 |
+|---|---|
+| **(a) 신규부터만** | 가장 안전. 점진적 (1~2주 후 전체 데이터 elapsed_ms 보유) |
+| **(b) Transform 으로 매칭** | 기존 데이터에도 trace_id 매칭으로 elapsed 계산 → transform-latency-5m 인덱스에 별도 적재 |
+| **(c) 과거 reindex** | 비용 큼, 보통 안 함 |
+
+권장: **(a) + (b) 병행**.
+
+##### D.7.4 검증
+
+```
+GET api-logs-*/_search?size=1
+{
+  "query": { "exists": { "field": "elapsed_ms" } },
+  "_source": ["elapsed_ms", "trace_id"]
+}
+```
+
+`elapsed_ms` 값 존재 + 0 < value < 60000 (60초) 확인.
+
+#### 시간 / 함정
+- 소요: **1주** (협의 0.5일 + 개발 2~3일 + 점진 배포 + 검증)
+- 함정 1: 11 MSA 동시 배포 어려움 → 1 MSA 먼저 + 1주 안정화 후 확장
+- 함정 2: filter 가 jersey/JAX-RS / Spring 등 framework 다르면 라이브러리도 분기 처리
+- 함정 3: clock skew (서버 간 시간 차) → in_ts 와 out_ts 차이 음수 가능성 — application 단에서 nanoTime() 사용 권장
+
+---
+
+### D.8 Step 8 — Daily Digest 자동 메일 (Day 12)
+
+#### 목표
+매일 09:00 KST 운영 리더에게 **어제 점검 결과 메일 자동 발송**. 사람이 dashboard 안 봐도 핵심 사실 손에.
+
+#### 절차
+
+##### D.8.1 Reporting connector 등록
+
+≡ → Stack Management → **Connectors** → Email.
+
+```
+SMTP host:    smtp.example.com
+Sender:       monitoring@example.com
+Recipients:   ops-leads@example.com, sre-team@example.com
+```
+
+##### D.8.2 D-D1 dashboard PDF generation
+
+≡ → Dashboard → D-D1 → 우상단 share → **Generate PDF report**. 한 번 수동 실행해 PDF 도착 확인.
+
+##### D.8.3 Scheduled report
+
+```
+Stack Management → Reporting → Create scheduled report:
+  Dashboard: D-D1
+  Format: PDF
+  Schedule: Daily at 09:00 KST
+  Recipients: ops-leads@example.com
+```
+
+> 💎 **Gold+ 라이선스 필요** (Reporting plugin 의 schedule). Basic 은 수동 export 만 가능.
+
+##### D.8.4 대안 — 외부 cron
+
+Gold+ 가 없으면 외부 cron job 으로:
+
+```bash
+#!/bin/bash
+# /etc/cron.d/daily-digest
+# 0 0 * * * 1 root /opt/monitoring/digest.sh
+
+# Kibana Reporting API 직접 호출 (POST /api/reporting/generate/printablePdf)
+curl -X POST -u kibana:$KEY \
+  -H 'kbn-xsrf: true' \
+  https://kibana/api/reporting/generate/printablePdfV2 \
+  -d @body.json
+
+# 결과 PDF 받아서 SMTP 로 발송
+sendmail -t < message.txt
+```
+
+##### D.8.5 Digest 내용 합의
+
+매니저와 한 번 합의:
+
+```
+Subject: [일일 운영] 2026-04-26 점검 결과
+
+📊 어제 SLO
+  - 가용성: 99.97% (목표 99.9% 🟢)
+  - p95: 412ms
+  - 총 거래: 100M
+  - 활성 MSA: 11/11 정상
+
+🔴 주의
+  - card-service 에러율 0.8% (평소 0.1%)
+  - Dead API 신규 3건
+  - Shadow API 1건
+  - 신규 에러 코드 2건
+
+📈 트렌드
+  - 7일 평균 가용성: 99.96% (선주 99.94%, 개선)
+  - Error budget 잔여: 73%
+
+🔗 상세: https://kibana/.../D-D1
+```
+
+#### 검증
+- ✅ 다음 날 09:00 메일 도착
+- ✅ PDF 첨부 + 인라인 요약 둘 다
+- ✅ "Reply" 시 운영팀 메일링 리스트로 전송됨
+
+#### 시간 / 함정
+- 소요: **1일** (Gold+) / 2~3일 (외부 cron 구현)
+- 함정 1: SMTP relay 사내 정책 → 방화벽/포트 사전 확인
+- 함정 2: PDF 가 깨지면 수신자 신뢰 ↓ → 처음 2주는 수신자에게 매일 confirm
+
+---
+
+### D.9 운영 1주차 회고 + 임계 조정 (Week 3)
+
+#### 목표
+실제 운영 1주 후 **false-positive / 누락 / noise** 분석 → 임계 조정.
+
+#### 절차
+
+##### D.9.1 Alert log 분석
+
+```
+GET .kibana_alerting-*-events/_search
+{
+  "query": {
+    "range": { "@timestamp": { "gte": "now-7d" } }
+  },
+  "size": 1000
+}
+```
+
+또는 Stack Management → Alerts → Execution log.
+
+##### D.9.2 분류
+
+| 분류 | 의미 | 액션 |
+|---|---|---|
+| **True Positive** | 진짜 사고 → 알람 잘 갔다 | 좋음, 유지 |
+| **False Positive** | 알람 갔는데 진짜 사고 아님 | 임계 상향, 윈도우 늘림 |
+| **False Negative** | 사고였는데 알람 안 감 | 임계 하향 또는 새 룰 |
+| **Noise (반복)** | 같은 사고에 알람 50번 | cooldown / dedup 강화 |
+
+##### D.9.3 임계 조정 예시
+
+```
+R-P0-2 Error Rate > 5%  →  > 3% (1주에 false-negative 2건 발견)
+R-P1-1 Critical API spike > 10건  →  > 25건 (false-positive 너무 많음)
+```
+
+##### D.9.4 운영자 피드백 수집
+
+- on-call 에게 "지난 7일 가장 신뢰 안 가는 alert 3개?" 질문
+- "있어야 했는데 없었던 alert 는?"
+- 매주 30분 리뷰 미팅 정착화
+
+##### D.9.5 Alert fatigue index 측정
+
+```
+Fatigue index = (False Positive + Noise) / Total Alerts
+```
+
+| Index | 상태 |
+|:-:|---|
+| < 0.2 | 🟢 건강 |
+| 0.2~0.4 | 🟡 주의 |
+| > 0.4 | 🔴 심각 — 사람이 무시 시작 |
+
+#### 시간
+- 소요: **3일** (분석 1일 + 조정 1일 + 리뷰 0.5일)
+- **반복 주기**: 매주 (처음 1달), 매달 (안정화 후)
+
+---
+
+### D.10 종합 체크리스트 (8단계)
+
+```
+Week 1
+[ ] D.1 Transform 3개 등록 + active 확인
+[ ] D.2 D-RT1 dashboard live + 30s refresh
+[ ] D.3 P0 alert 5개 + Connector + Runbook
+[ ] D.4 Critical API Tier 0 정의 + 전용 panel/alert
+
+Week 2
+[ ] D.5 ILM policy 적용 + 기존 인덱스 검증
+[ ] D.6 Kibana Spaces 4개 + Role 정의
+[ ] D.7 Latency 정합화 — application elapsed_ms 적재 (1 MSA 시작)
+[ ] D.8 Daily Digest 자동 메일 (또는 외부 cron)
+
+Week 3 — 회고
+[ ] D.9 Alert log 분석 + 임계 조정 + Fatigue index < 0.2
+```
+
+### D.11 8단계 종료 후 — 운영 정착 6단계
+
+```mermaid
+flowchart LR
+    W1[Week 1<br/>인프라]
+    W2[Week 2<br/>운영화]
+    W3[Week 3<br/>회고+조정]
+    M2[Month 2<br/>D-RT2/RT3 추가]
+    M3[Month 3<br/>도메인 dashboard 분화]
+    Q2[Quarter 2<br/>Capacity 예측<br/>+ Platinum 도입 검토]
+
+    W1 --> W2 --> W3 --> M2 --> M3 --> Q2
+
+    style W1 fill:#fff9c4
+    style W3 fill:#c8e6c9
+    style Q2 fill:#bbdefb
+```
+
+| 시점 | 추가 작업 |
+|---|---|
+| Month 2 | D-RT2 (MSA Health Matrix), D-RT3 (거래 추적) 추가 |
+| Month 2 | M-D2 (New Error Code) — Watcher 또는 application 측 구현 |
+| Month 3 | 서비스별 dashboard 분화 (각 서비스 팀 자가 운영) |
+| Month 3 | D-K1 주간 KPI 보고 정착화 + Error budget 의사결정 적용 |
+| Quarter 2 | Capacity 예측 (인덱스 증가율 → 클러스터 확장 시점) |
+| Quarter 2 | 💎 Platinum 도입 검토 — ML / Searchable Snapshots / Field Security |
+
+→ **2주 production 진입 + 분기마다 진화**.
