@@ -198,7 +198,7 @@ flowchart TD
 - 1억 docs/일 × 90일 = 9TB 규모에서 큰 절감
 
 **3. Field-level Security**
-- 우리 PII 마스킹 정책 ([10-field-policy 등](10-field-policy.md)) 보다 ES 자체에서 처리
+- 우리 PII 마스킹 정책 (08 §3.0 의 fieldPolicy 활용) 보다 ES 자체에서 처리
 - 사용자 role 별로 `data.body.cardNumber`, `data.body.juminNo` 차폐
 - 로그 분석가는 보지만 운영자는 못 봄 — 라이선스/감사 강력
 
