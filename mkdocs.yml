@@ -100,6 +100,7 @@ nav:
       - "09a. 실 운영 필드 매핑 (회사 cheatsheet) ⭐": 09a-real-field-mapping.md
       - "09b. 원안 (Grok) — 참고": 09-a-grok-monotoring-strategy.md
       - "09c. 52 메트릭 우선순위 · 용량 · 플래티넘 ⭐": 09c-metric-priority.md
+      - "10. 실습 데이터셋 가이드 (30M / 30일) ⭐": 10-practice-dataset.md
   - 📚 Reference:
       - "실 운영 doc 구조 (필드 정의)": 99-real-document.md
       - "3-Tier 분산 추적 (PT/BT/MCI)": 99-tier-tracing.md
