@@ -13,8 +13,8 @@
 flowchart LR
     User["👤 사용자<br/>(브라우저/앱)"]
     PT["🟦 PT (Presentation Tier)<br/>PP / WP<br/>App PT, Web PT"]
-    BT["🟩 BT (Business Tier)<br/>BU / CD / FA / MB / PU / PC / PY / PA<br/>비즈니스 로직"]
-    MCI["🟧 MCI (Mainframe Connector)<br/>AS / 외부 코어<br/>계정계 / ACS"]
+    BT["🟩 BT (Business Tier)<br/>BU / CD / FA / MB / PU / PC / PY / PA / AS<br/>비즈니스 로직 + 결제 코어 (AS)"]
+    MCI["🟧 MCI (Mainframe Connector)<br/>외부 계정계 / 코어<br/>레거시 호스트 연동"]
     GW["🟪 외부 G/W<br/>대외 연동"]
 
     User -->|"app_uuid<br/>guid 채번"| PT
@@ -99,19 +99,23 @@ sequenceDiagram
     participant U as 사용자
     participant FE as FE (Vue)
     participant PT as PT (PP/WP)
-    participant BT as BT (PY)
-    participant MCI as MCI (AS)
+    participant BT_PY as BT (PY)
+    participant BT_AS as BT (AS — 결제코어)
+    participant MCI as MCI (외부 계정계)
 
     U->>FE: 결제 버튼 클릭
     Note over FE: app_uuid 채번<br/>scrn_uuid 이미 있음
     FE->>PT: POST /pay<br/>app_uuid, scrn_uuid 전달
     Note over PT: guid 채번<br/>tier_c=PT
-    PT->>BT: BT 호출<br/>caller_uuid=guid
-    Note over BT: bt_uuid 채번<br/>tier_c=BT
-    BT->>MCI: 결제 코어 호출<br/>caller_uuid=bt_uuid
-    Note over MCI: mci_uuid 채번<br/>tier_c=MCI
-    MCI-->>BT: 응답
-    BT-->>PT: 응답
+    PT->>BT_PY: BT 호출<br/>caller_uuid=guid
+    Note over BT_PY: bt_uuid 채번<br/>tier_c=BT
+    BT_PY->>BT_AS: 결제 코어 호출<br/>caller_uuid=bt_uuid
+    Note over BT_AS: bt_uuid 채번 (별도)<br/>tier_c=BT
+    BT_AS->>MCI: 외부 계정계 호출<br/>caller_uuid=bt_uuid
+    Note over MCI: mci_uuid 채번<br/>tier_c=MCI<br/>log_div=MCI_*
+    MCI-->>BT_AS: 응답
+    BT_AS-->>BT_PY: 응답
+    BT_PY-->>PT: 응답
     PT-->>FE: 응답
     FE-->>U: 결과 표시
 ```
@@ -325,11 +329,12 @@ COUNT > 3 in 5min  → "사용자 retry 폭주" alert
 │   WP)   │              │        │        │            │                │
 │ ─────── ┼──────────────┼────────┼────────┼────────────┼──────────────── │
 │ BT (CD/ │   99.92%     │  280   │  3.0K  │     5      │ E102 (3)       │
-│   FA/   │              │        │        │            │                │
-│   PY/…) │              │        │        │            │                │
+│   FA/PY/│              │        │        │            │                │
+│   AS/…) │              │        │        │            │                │
 │ ─────── ┼──────────────┼────────┼────────┼────────────┼──────────────── │
-│ MCI (AS │   99.85%     │  450   │  2.1K  │    12      │ 9999 (8)       │
-│   /외부)│              │        │        │            │                │
+│ MCI     │   99.85%     │  450   │  2.1K  │    12      │ 9999 (8)       │
+│ (외부   │              │        │        │            │                │
+│  계정계)│              │        │        │            │                │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -518,8 +523,10 @@ Pattern: 같은 caller_uuid 가 짧은 시간에 N+1 회 호출됨
 
 | 구분 | 의미 | log_div |
 |---|---|---|
-| **MCI core** | 사내 코어 (계정계, ACS) | `MCI_SEND` / `MCI_RECV` |
+| **MCI core** | 외부 계정계 / 레거시 호스트 | `MCI_SEND` / `MCI_RECV` |
 | **GW (G/W)** | 대외 시스템 | `GW_SEND` / `GW_RECV` |
+
+> 사내 결제 코어 **AS(ACS) 는 BT 계층** — MCI 를 호출하는 *발신측*. MCI 자체는 외부 의존성만 가리킴.
 
 ### 5.5.1 의존성 별 KPI
 
@@ -642,9 +649,9 @@ gw_uuid       대외 G/W              → 외부 호출
 caller_uuid   호출 chain (parent)    → 호출 graph
 
 ══════════ Tier 별 KPI ══════════
-PT (PP/WP):    사용자 시각 — Availability, Error rate, p95
-BT (BU/CD/FA/...): 비즈니스 로직 — 같은 항목 + 의존성 관리
-MCI (AS/외부): 외부 의존 — Error rate, p95 가 가장 변동성
+PT (PP/WP):       사용자 시각 — Availability, Error rate, p95
+BT (BU/CD/FA/MB/PU/PC/PY/PA/AS): 비즈니스 로직 + 결제코어(AS) — 같은 항목 + 의존성 관리
+MCI (외부 계정계): 외부 의존 — Error rate, p95 가 가장 변동성
 
 ══════════ 핵심 KQL ══════════
 한 거래 추적:        guid : "<id>"

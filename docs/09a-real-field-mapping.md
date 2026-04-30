@@ -52,22 +52,25 @@ metadata.logdate.*     ap → logstash 시간 흐름
 
 | svc_c | 한국어 이름 | tier | 비고 |
 |:-:|---|---|---|
-| **BU** | 혜택 | BT/MCI | 마일리지/포인트/캐시백 |
-| **CD** | 카드 | BT/MCI | 발급/관리/한도 |
-| **FA** | 금융 | BT/MCI | 계좌/이체/잔액 |
-| **MB** | 회원 | BT/MCI | 인증/회원정보 |
-| **PU** | 이용내역 | BT/MCI | 거래내역/명세 |
-| **PC** | 공통 | BT/MCI | 코드/공지/배너 |
-| **PY** | 간편결제(페이) | BT/MCI | 결제 |
+| **BU** | 혜택 | BT | 마일리지/포인트/캐시백 |
+| **CD** | 카드 | BT | 발급/관리/한도 |
+| **FA** | 금융 | BT | 계좌/이체/잔액 |
+| **MB** | 회원 | BT | 인증/회원정보 |
+| **PU** | 이용내역 | BT | 거래내역/명세 |
+| **PC** | 공통 | BT | 코드/공지/배너 |
+| **PY** | 간편결제(페이) | BT | 결제 |
 | **PP** | App PT | PT | 앱 프론트 |
 | **WP** | Web PT | PT | 웹 프론트 |
-| **PA** | 관리자 | BT/MCI | 운영 |
-| **AS** | ACS(결제시스템) | MCI | 코어 결제 |
+| **PA** | 관리자 | BT | 운영 |
+| **AS** | ACS(결제시스템) | **BT** | 결제 코어 (사내). MCI 호출 발생 |
+
+> **계층 구조 정정 (2026-04-30)**: 11 MSA 중 **BT 9개 (BU/CD/FA/MB/PU/PC/PY/PA/AS) + PT 2개 (PP/WP)**.
+> MCI 계층은 *외부 코어* (계정계 등) 와 *대외 G/W* 만 — MSA 가 아닌 외부 의존성. AS(ACS) 는 사내 결제 코어 BT 서비스로 MCI 를 호출하는 쪽.
 
 **Saved query 후보** (KQL):
 ```
-svc_c : ("BU" or "CD" or "FA" or "MB" or "PU" or "PC" or "PY" or "PA" or "AS")    # BT 계열
-svc_c : ("PP" or "WP")                                                              # PT 계열
+svc_c : ("BU" or "CD" or "FA" or "MB" or "PU" or "PC" or "PY" or "PA" or "AS")    # BT 9개
+svc_c : ("PP" or "WP")                                                              # PT 2개
 svc_c : ("PY" or "AS" or "FA")                                                      # 결제 critical path
 ```
 
@@ -184,8 +187,8 @@ filter (post): out_ts == null AND in_ts < now-10m
 ```mermaid
 flowchart LR
     User[사용자] --> PT[PP/WP — PT layer]
-    PT -->|caller_uuid| BT[BU/CD/FA/MB/PU/PC/PY — BT layer]
-    BT -->|caller_uuid| MCI[AS / 외부 — MCI layer]
+    PT -->|caller_uuid| BT[BU/CD/FA/MB/PU/PC/PY/PA/AS — BT layer]
+    BT -->|caller_uuid| MCI[외부 코어 / 대외 G/W — MCI layer]
 
     style PT fill:#bbdefb
     style BT fill:#c8e6c9

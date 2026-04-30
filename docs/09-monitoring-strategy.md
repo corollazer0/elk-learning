@@ -54,8 +54,8 @@ flowchart LR
 
 | 항목 | 값 | 시사점 |
 |------|----|----|
-| MSA 수 | **11** (BU/CD/FA/MB/PU/PC/PY/PP/WP/PA/AS) | svc_c 차원으로 분리 가능 |
-| Tier | **3** (PT/BT/MCI) — 모든 거래가 통과 | tier_c 별 분석 강력 |
+| MSA 수 | **11** — BT 9개 (BU/CD/FA/MB/PU/PC/PY/PA/AS) + PT 2개 (PP/WP) | svc_c 차원으로 분리 가능 |
+| Tier | **3** (PT/BT/MCI) — MCI 는 사내 MSA 가 아닌 외부 계정계/G/W | tier_c 별 분석 강력 |
 | 일 docs | ~1억+ | 평균 1.2K/sec, peak 5~10K/sec |
 | in:out 비율 | 1:1+ (PT/BT/MCI 각 in/out) | 한 거래 = 6~8 docs |
 | 채널 | **4종** (MA/MW/PW/DA) | 사용자 segment 분석 |
@@ -136,8 +136,8 @@ flowchart LR
 flowchart LR
     User["👤 사용자<br/>(MA/MW/PW/DA)"]
     PT["🟦 PT (PP/WP)<br/>tier_c=PT"]
-    BT["🟩 BT (BU/CD/FA/MB/PU/PC/PY/PA)<br/>tier_c=BT"]
-    MCI["🟧 MCI core (AS)<br/>tier_c=MCI<br/>log_div=MCI_*"]
+    BT["🟩 BT (BU/CD/FA/MB/PU/PC/PY/PA/AS)<br/>tier_c=BT"]
+    MCI["🟧 MCI core (외부 계정계)<br/>tier_c=MCI<br/>log_div=MCI_*"]
     GW["🟪 G/W (대외)<br/>tier_c=MCI<br/>log_div=GW_*"]
 
     User -->|"app_uuid<br/>scrn_uuid"| PT
