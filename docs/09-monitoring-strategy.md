@@ -4,6 +4,7 @@
 > **가정**: `data` 필드 (자유형식 JSON) 만 unindexed, 그 외 모든 업무 필드 (svc_c / msg_c / sts_c / proc_tm / guid / chan_c / os_kdc / scrn_uuid / dgtl_cusno 등) 는 indexed.
 > **목표**: SRE / 개발 / 운영 3 관점 + 4 시간대 (실시간 / 일 / 주 / 월) 으로 **50+ 실무 메트릭** 선정 + 10 dashboard + Alerting 룰 + 운영 절차.
 > **선수**: [09a-real-field-mapping.md](09a-real-field-mapping.md) (실 필드 cheatsheet), [99-real-document.md](99-real-document.md) (필드 정의), [99-tier-tracing.md](99-tier-tracing.md) (3-tier 추적).
+> **연계**: [09c. 52 메트릭 우선순위·용량·플래티넘 ⭐](09c-metric-priority.md) — Tier S/A/B/C 정렬 + 용량 산정 + ML ROI.
 >
 > 🔄 **2026-04-30 전면 재작성** — 09a 기반으로 실 필드명 적용 + 신규 카테고리 (사용자/UX) 추가. 기존 mock 기반 09 의 좋은 구조 (3 관점·4 시간대·8단계 셋업) 유지.
 
