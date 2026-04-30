@@ -101,6 +101,12 @@ nav:
       - "09b. 원안 (Grok) — 참고": 09-a-grok-monotoring-strategy.md
       - "09c. 52 메트릭 우선순위 · 용량 · 플래티넘 ⭐": 09c-metric-priority.md
       - "10. 실습 데이터셋 가이드 (30M / 30일) ⭐": 10-practice-dataset.md
+      - "10b. Kibana Lens 첫걸음 (초보자)": 10b-kibana-lens-basics.md
+      - "11. 레시피 — SRE Golden Signals (M-S1~S10)": 11-recipe-sre.md
+      - "12. 레시피 — 백엔드/플랫폼 (M-P1~P12)": 12-recipe-backend.md
+      - "13. 레시피 — 도메인/비즈니스 (M-D1~D12)": 13-recipe-domain.md
+      - "14. 레시피 — 사용자/UX (M-U1~U12)": 14-recipe-user-ux.md
+      - "15. 레시피 — 운영/Op-Excellence (M-O1~X4)": 15-recipe-ops.md
   - 📚 Reference:
       - "실 운영 doc 구조 (필드 정의)": 99-real-document.md
       - "3-Tier 분산 추적 (PT/BT/MCI)": 99-tier-tracing.md
