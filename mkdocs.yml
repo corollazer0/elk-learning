@@ -97,8 +97,11 @@ nav:
       - "07. 일일 배치 통계 인덱스 (Transform / Rollup / cron)": 07-batch-transform.md
       - "08. Payload unindexed 환경 4-Phase 전략": 08-card-platform-payload-strategy.md
       - "09. MSA 11서버 종합 KPI · 관측성 · 알림 전략": 09-monitoring-strategy.md
-      - "09a. 원안 (Grok) — 참고": 09-a-grok-monotoring-strategy.md
+      - "09a. 실 운영 필드 매핑 (회사 cheatsheet) ⭐": 09a-real-field-mapping.md
+      - "09b. 원안 (Grok) — 참고": 09-a-grok-monotoring-strategy.md
   - 📚 Reference:
+      - "실 운영 doc 구조 (필드 정의)": 99-real-document.md
+      - "3-Tier 분산 추적 (PT/BT/MCI)": 99-tier-tracing.md
       - "ES 8 vs 9 비교": 99-es-version-comparison.md
       - "KQL 한 페이지 cheatsheet": 99-kql-cheatsheet.md
       - "Troubleshooting": 99-troubleshooting.md
