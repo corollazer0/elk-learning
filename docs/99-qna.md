@@ -462,6 +462,88 @@ public void hourlyAggregate() {
 
 ---
 
+## Q-07. 회사 환경 5가지 검증 결과 — 정정사항 정리
+
+- **출처**: 사용자가 회사에서 직접 확인 후 회신
+- **맥락**: 09a 와 99-tier-tracing 의 검증 체크리스트 5개 우선 항목 답변. 발견된 정정사항 반영 필요.
+
+### 1. `caller_uuid` 정확한 의미
+
+**각 layer 는 자체 guid 필드를 가짐**:
+
+| tier | 자체 guid 필드 |
+|---|---|
+| **PT** | `guid` |
+| **BT** | `bt_uuid` (= bt_guid 의미) |
+| **MCI (core)** | `mci_uuid` |
+| **MCI (외부 GW)** | `gw_uuid` |
+
+`caller_uuid` = **upstream 호출자의 guid 값**:
+- PT doc: caller_uuid 는 보통 없음 (root)
+- BT doc: caller_uuid = `guid` (PT 의)
+- MCI doc: caller_uuid = `bt_uuid` (BT 의)
+- GW doc: caller_uuid = `bt_uuid` (BT 의)
+
+→ 같은 거래 chain 추적 시:
+```
+PT 의 guid="A" → BT 의 (bt_uuid="B", caller_uuid="A") → MCI 의 (mci_uuid="C", caller_uuid="B")
+```
+
+99-tier-tracing.md §1.3 의 호출 chain 표 정확.
+
+### 2. `log_div` 값 — 더 풍부함
+
+`*_IN`, `*_OUT` 외 **추가 4종 확인**:
+- `MCI_SEND`: MCI 측에 전송
+- `MCI_RECV`: MCI 측에서 수신
+- `GW_SEND`: 대외 G/W 로 전송
+- `GW_RECV`: 대외 G/W 에서 수신
+
+> 즉 KQL 에서 `log_div : *_OUT` 는 **MCI/GW 트래픽을 안 잡음**. 정확한 query 는:
+> ```
+> log_div : (*_OUT or MCI_RECV or GW_RECV)    # 응답 (downstream → 우리)
+> log_div : (*_IN or MCI_SEND or GW_SEND)      # 요청 (우리 → downstream)
+> ```
+
+### 3. **G/W 와 MCI 는 같은 계층** (외부 vs 코어 구분)
+
+| 구분 | 외부 시스템 |
+|---|---|
+| **MCI** | 사내 **코어 서버** 연동 (계정계 / ACS) |
+| **G/W (Gateway)** | **대외** 시스템 연동 |
+
+→ `tier_c` 는 PT / BT / MCI 3종이지만, **MCI tier 안에서 `log_div` 의 `MCI_*` vs `GW_*` 로 코어 vs 대외 구분**.
+
+**활용**:
+- "코어 (MCI) 가 느려진 건가? 대외 (GW) 가 느려진 건가?" → `log_div` prefix 로 분리
+
+### 4. 정확한 필드명: **`fir_err`** (NOT `f1r_err`)
+
+→ 예시 doc 에 `f1r_err` 는 **표기 오류**. 실 필드명은 `fir_err`.
+
+### 5. `data` 는 완전히 자유 형식
+
+> "data 하위에는 자유롭게 들어감. 정해진 양식이 있지 않음. **string, number, json object, array** 형태의 데이터가 들어갈 수 있음."
+
+→ 함의:
+- **`data.body` 같은 정적 path 가정 절대 안 됨**
+- 키 자체도 동적 (`<svc_id>_OUT`, 또는 다른 패턴)
+- 값 타입도 동적 (mapper 폭발 위험 ↑↑)
+- 거의 확실히 **`data` 는 `enabled: false` 또는 `flattened` 로 매핑됨**
+- 검색·집계 직접 불가 → **08 의 Phase 2 (runtime field) / Phase 3 (ingest pipeline) 가 필수**
+
+추가 시사점:
+- runtime field 도 **각 svc_id 마다 다른 path** 가 필요할 수 있음 (path 표현 어려움)
+- 가장 안전: ingest pipeline 으로 application 단에서 promote 합의
+- 또는 Phase 4 (앱 SDK 표준화) 만이 진짜 해결
+
+### 문서 보강 — 다음 push
+- ✅ 09a (caller_uuid 정확화, log_div 4종 추가, fir_err 정정, data 자유형식 강화)
+- ✅ 99-tier-tracing (caller_uuid 정확화, GW 분리 시나리오 추가)
+- ✅ 본 99-qna 에 정식 등록
+
+---
+
 ## (이후 등록될 Q 자리)
 
 학습 진행하시며 막히는 지점 알려 주시면 여기에 추가합니다.

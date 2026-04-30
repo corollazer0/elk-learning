@@ -2,6 +2,8 @@
 
 > **목적**: 실 운영 환경의 **3-tier 아키텍처** + **8종 trace ID** 를 활용한 분산 추적·KPI 분석. 09 문서의 M-P4 (Inter-Service Latency) 의 진짜 구현체.
 > **선수**: [99-real-document.md](99-real-document.md), [09a-real-field-mapping.md](09a-real-field-mapping.md)
+>
+> 🔄 **2026-04-30 정정** ([Q-07](99-qna.md#q-07-회사-환경-5가지-검증-결과--정정사항-정리)) — caller_uuid 의미 정확화 / G/W 와 MCI 같은 tier / log_div 6종 / fir_err 정정.
 
 ---
 
@@ -413,11 +415,11 @@ Metrics:
 
 ---
 
-## 4. f1r_err — 최초 에러 위치 추적
+## 4. fir_err — 최초 에러 위치 추적
 
 ### 4.1 의미
 
-> PT → BT 연동 시 BT 에서 에러 발생 → 그 BT 거래에 `f1r_err: "Y"` 표기.
+> PT → BT 연동 시 BT 에서 에러 발생 → 그 BT 거래에 `fir_err: "Y"` 표기.
 
 → 같은 에러가 여러 tier 에 카스케이드 되는데, **최초 발생 tier** 만 정확히 파악하면 진짜 원인 추적 가능.
 
@@ -426,14 +428,14 @@ Metrics:
 #### 어느 tier 에서 에러가 시작되나?
 
 ```kql
-log_div : *_OUT and f1r_err : "Y"
+log_div : *_OUT and fir_err : "Y"
 ```
-**Lens**: count by `f1r_c` (tier 표시)
+**Lens**: count by `fir_c` (tier 표시)
 
 ```
-f1r_c = MCI: 60% ← 외부 코어 의존성이 가장 자주 첫 에러 발생
-f1r_c = BT:  35%
-f1r_c = PT:   5%
+fir_c = MCI: 60% ← 외부 코어 의존성이 가장 자주 첫 에러 발생
+fir_c = BT:  35%
+fir_c = PT:   5%
 ```
 
 → MCI 안정성 향상이 ROI 가장 큼.
@@ -441,13 +443,13 @@ f1r_c = PT:   5%
 #### 시나리오별 분포
 
 ```kql
-log_div : *_OUT and f1r_err : "Y" and svc_c : "PY"      # 결제 도메인의 첫 에러
-log_div : *_OUT and f1r_err : "Y" and chan_c : "MA"     # 모바일앱 한정
+log_div : *_OUT and fir_err : "Y" and svc_c : "PY"      # 결제 도메인의 첫 에러
+log_div : *_OUT and fir_err : "Y" and chan_c : "MA"     # 모바일앱 한정
 ```
 
 #### Alert
 ```
-KQL: f1r_err : "Y" and f1r_c : "MCI"
+KQL: fir_err : "Y" and fir_c : "MCI"
 조건: count > 100 in 5min → MCI 측 장애 가능성 P0
 ```
 
@@ -455,17 +457,27 @@ KQL: f1r_err : "Y" and f1r_c : "MCI"
 
 ## 5. caller_uuid — 호출 Graph 시각화
 
-### 5.1 메커니즘
+### 5.1 메커니즘 (확정 — Q-07)
+
+각 layer 는 **자체 guid 필드**를 가짐:
+
+| tier | 자체 guid 필드 | caller_uuid 가 가리키는 값 |
+|---|---|---|
+| **PT** | `guid` | (없음 — root) |
+| **BT** | `bt_uuid` | 상위 PT 의 `guid` |
+| **MCI (core)** | `mci_uuid` | 상위 BT 의 `bt_uuid` |
+| **MCI (외부 GW)** | `gw_uuid` | 상위 BT 의 `bt_uuid` |
 
 ```
-caller_uuid = "이 doc 을 호출한 상위 거래 ID"
-
-PT (guid=A) 의 caller_uuid: 없음 또는 같은 A
-BT (bt_uuid=B) 의 caller_uuid: A (PT 의 guid)
-MCI (mci_uuid=C) 의 caller_uuid: B (BT 의 bt_uuid)
+PT  doc:  guid="A"        (root, caller_uuid 없음)
+BT  doc:  bt_uuid="B"     caller_uuid="A"
+MCI doc:  mci_uuid="C"    caller_uuid="B"
+GW  doc:  gw_uuid="D"     caller_uuid="B"  (BT가 GW 호출)
 ```
 
-→ caller_uuid 따라가면 호출 chain 복원.
+→ caller_uuid 따라가면 호출 chain 정확히 복원.
+
+> 💡 **모든 doc 은 같은 `guid` 공유** (PT 가 채번한 root 그대로 propagate). 따라서 `guid` 만으로도 한 거래 chain 의 모든 doc 추출 가능.
 
 ### 5.2 호출 chain 추적 query
 
@@ -500,6 +512,73 @@ Pattern: 같은 caller_uuid 가 짧은 시간에 N+1 회 호출됨
 
 ---
 
+## 5.5 G/W vs MCI core 분리 분석 (Q-07 정정)
+
+**확정**: `tier_c` 는 PT/BT/MCI 3종이지만, **MCI tier 안에서 코어 vs 대외 G/W 구분**:
+
+| 구분 | 의미 | log_div |
+|---|---|---|
+| **MCI core** | 사내 코어 (계정계, ACS) | `MCI_SEND` / `MCI_RECV` |
+| **GW (G/W)** | 대외 시스템 | `GW_SEND` / `GW_RECV` |
+
+### 5.5.1 의존성 별 KPI
+
+#### 코어 의존성 (MCI) latency
+```kql
+tier_c : "MCI" and log_div : (MCI_SEND or MCI_RECV)
+```
+**Lens**: `percentile(proc_tm, 95) by svc_id`
+
+#### 대외 의존성 (G/W) latency
+```kql
+tier_c : "MCI" and log_div : (GW_SEND or GW_RECV)
+```
+**Lens**: 동일
+
+### 5.5.2 D-Tier5: MCI core vs GW 비교 dashboard
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ 🔵 MCI Core 의존성 (사내 계정계)                                    │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │ p95: ━━━━━━━━━━━━━━ 220ms                                     │ │
+│ │ Error rate: 0.05% 🟢                                         │ │
+│ │ TPS: 1.8K                                                     │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│ 🟣 G/W 의존성 (대외 시스템)                                        │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │ p95: ━━━━━━━━━━━━━━━━━━━━━━━━ 850ms ← 주목                    │ │
+│ │ Error rate: 1.2% 🟡                                           │ │
+│ │ TPS: 0.4K                                                     │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+→ 일반적으로 **G/W 가 MCI core 보다 변동성·latency 큼** (외부 통제 불가). 분리 모니터링이 필수.
+
+### 5.5.3 Alert — 외부 의존성 spike
+
+```yaml
+Rule: GW p95 > 2초
+KQL: tier_c:"MCI" and log_div:(GW_SEND or GW_RECV)
+Condition: percentile(proc_tm, 95) > 2000 in 5min
+Severity: P1 (외부 협업팀 호출)
+Slack: #external-deps + 외부 시스템 담당자
+```
+
+### 5.5.4 한 화면에 보는 Lens
+
+```
+Type:    Bar (vertical, multi-series)
+X:       svc_id (Top 20 외부 호출)
+Y:       percentile(proc_tm, 95)
+Filter:  tier_c:"MCI" and log_div:(MCI_SEND or MCI_RECV or GW_SEND or GW_RECV)
+Color:   log_div prefix (MCI vs GW 색상 분리)
+```
+
+---
+
 ## 6. 실 운영 painPoint 시나리오 8선
 
 | # | 시나리오 | 활용 trace ID | KPI |
@@ -511,7 +590,7 @@ Pattern: 같은 caller_uuid 가 짧은 시간에 N+1 회 호출됨
 | 5 | MCI 외부 코어 늦어짐 | `tier_c:MCI` p95 spike | M-P4 Inter-Tier |
 | 6 | 신규 배포 후 PT 회귀 | timeshift + tier_c:PT | M-D2 + 배포시각 |
 | 7 | 화면 funnel 의 결제 버튼 → 인증 단계 drop | `scrn_uuid` 시퀀스 | 시나리오 C |
-| 8 | 첫 에러가 BT 에서 시작 시 cascade | `f1r_err:Y + f1r_c:BT` | M-X8 |
+| 8 | 첫 에러가 BT 에서 시작 시 cascade | `fir_err:Y + fir_c:BT` | M-X8 |
 
 각 시나리오는 위 dashboard 또는 saved query 로 즉시 재현 가능.
 
@@ -525,7 +604,7 @@ Pattern: 같은 caller_uuid 가 짧은 시간에 N+1 회 호출됨
 [ ] guid 가 PT/BT/MCI 모든 doc 에 채워져 있는지
 [ ] caller_uuid 의 의미 (parent guid? bt_uuid?) 회사에서 확인
 [ ] tier_c 의 PT/BT/MCI 분포
-[ ] f1r_err 와 fir_err 정확한 필드명
+[ ] fir_err 와 fir_err 정확한 필드명
 [ ] log_div 의 *_IN/*_OUT 외 다른 값 (예: MCI_RECV) 의미
 ```
 
@@ -543,7 +622,7 @@ Pattern: 같은 caller_uuid 가 짧은 시간에 N+1 회 호출됨
 
 ### Step 4 (Week 2) — Alert 룰 + 시나리오 학습
 
-- f1r_err 기반 알림 (MCI 장애 조기 감지)
+- fir_err 기반 알림 (MCI 장애 조기 감지)
 - 결제 funnel drop-off alert
 - 사용자 retry 폭주 alert
 
@@ -571,7 +650,7 @@ MCI (AS/외부): 외부 의존 — Error rate, p95 가 가장 변동성
 한 거래 추적:        guid : "<id>"
 PT 사용자 시각:      tier_c : "PT" and log_div : *_OUT
 BT→MCI bottleneck:  tier_c : "MCI" and proc_tm > 1000
-첫 에러 발생 tier:   f1r_err : "Y" → group by f1r_c
+첫 에러 발생 tier:   fir_err : "Y" → group by fir_c
 화면 funnel:        scrn_uuid : "<id>" sort by @timestamp
 사용자 retry:        dgtl_cusno : "<id>" and sts_c : "ERROR"
 
@@ -579,7 +658,7 @@ BT→MCI bottleneck:  tier_c : "MCI" and proc_tm > 1000
 - caller_uuid 의 정확한 의미 회사 확인 (parent guid? 아니면 다른?)
 - log_div 가 *_IN/*_OUT 외 어떤 값 더 있는지
 - guid 가 정말 BE 모든 doc 에 채워지는지 (PT/BT/MCI 다 포함?)
-- f1r_err 는 BT 한정인지 다른 tier 에도 적용 가능한지
+- fir_err 는 BT 한정인지 다른 tier 에도 적용 가능한지
 ```
 
 ---
