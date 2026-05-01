@@ -758,36 +758,48 @@ To:    now/d+9h          ← 오늘 09:00 (KST)
 | `+9h` | 9시간 더하기 (= "9시" 의미) |
 | `/d` | 일 단위로 round-down |
 
-### 단계별 설정 (스크린샷 기준)
+### 단계별 설정 — *URL 로 박기* (Absolute 탭은 date math 미지원)
+
+⚠️ Kibana 8.x 의 **Absolute 탭은 date math 안 받음** ("Allowed formats: MMM D, YYYY..." 에러). 우회 필요.
 
 ```
-1. Dashboard 화면에서 우상단 시간 픽커 클릭
-   ┌──────────────────────────────────┐
-   │ 📅 Last 7 days  ◯ Apply ▼        │ ← 클릭
-   └──────────────────────────────────┘
+1. Dashboard 열기 (현재 시간 무엇이든 OK)
 
-2. 펼친 패널 → 좌상단 [Show dates] 또는 직접 입력 영역
-   ┌──────────────────────────────────────┐
-   │  Quick select  Commonly used  Custom │
-   │ ──────────────                       │
-   │  From  [ now-1d/d+9h         ]       │  ← 직접 입력
-   │  To    [ now/d+9h            ]       │
-   │           [Update]                   │
-   └──────────────────────────────────────┘
+2. 주소창 URL 끝에 추가:
+   &_g=(time:(from:'now-1d%2Fd%2B9h',to:'now%2Fd%2B9h'))
 
-3. [Update] → 차트가 어제 9시~오늘 9시로 갱신 (확인)
+   인코딩:
+     /  →  %2F
+     +  →  %2B
+     원문: from='now-1d/d+9h'  to='now/d+9h'
 
-4. Dashboard 우상단 [Save] 버튼 클릭
-   ┌──────────────────────────────────────┐
-   │ Save dashboard                        │
-   │ Title    [D2 일간 점검 (9-9)        ] │
-   │ Description ...                       │
-   │ ☑ Store time with dashboard           │ ★ 반드시 체크
-   │ □ Tags                                │
-   │            [Save]                     │
-   └──────────────────────────────────────┘
+3. Enter → 차트가 어제 9시 ~ 오늘 9시로 갱신 확인
 
-5. 이후 누가 열어도 → date math 가 *재계산* 되어 같은 윈도우 표시
+4. 우상단 [Save] → ☑ Store time with dashboard → [Save]
+
+5. 이후 누가 열어도 같은 윈도우 자동 적용
+   (date math 표현이 저장됨 → 매번 재계산)
+```
+
+#### 사이트 전체 default 변경 (대안)
+
+```
+Stack Management → Advanced Settings → timepicker:timeDefaults
+
+{
+  "from": "now-1d/d+9h",
+  "to": "now/d+9h"
+}
+```
+
+→ 이후 만드는 *신규* dashboard / Discover 의 default 가 9-9.
+
+#### URL 한번 적용 후 picker 에서 재편집 가능
+
+```
+1. URL 로 한번 9-9 적용
+2. 시간 픽커 클릭 → 상단에 "now-1d/d+9h" 같은 표시
+3. 그 텍스트 클릭하면 그 자리에서 편집 input 으로 변환 ✅
 ```
 
 ### 시간대 (Timezone) 확인 — 중요
