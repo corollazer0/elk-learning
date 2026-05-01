@@ -592,6 +592,94 @@ PT 의 guid="A" → BT 의 (bt_uuid="B", caller_uuid="A") → MCI 의 (mci_uuid=
 
 ---
 
+## Q-12. Kibana 알림으로 사내 oncall **Custom REST API** 호출 가능?
+
+### 결론
+
+✅ **가능합니다 — Webhook Connector**, **Basic 라이선스 포함** (Platinum 불필요).
+
+### Connector 옵션
+
+| Connector | 설명 | 라이선스 |
+|---|---|---|
+| **Webhook** ⭐ | 임의 REST API 호출 | **Basic** |
+| Slack / Teams | incoming webhook | Basic |
+| PagerDuty / Opsgenie | 표준 incident API | Basic |
+| Email | SMTP | Gold+ |
+| ServiceNow / Jira / Cases | 티켓 자동 생성 | Basic+ |
+| Index | ES 인덱스에 doc 저장 | Basic |
+
+### 5분 설정
+
+```
+Stack Management → Connectors → Create connector → Webhook
+  Name:           oncall-api-prod
+  Method:         POST
+  URL:            https://oncall.nhcard.com/v1/page
+  Authentication: Basic / Bearer
+  Headers:        X-API-Key, Content-Type 등
+  → [Save & Test]
+```
+
+### Rule Action 의 Mustache 템플릿
+
+```json
+{
+  "alertId":   "{{rule.id}}",
+  "ruleName":  "{{rule.name}}",
+  "severity":  "P0",
+  "fired_at":  "{{date}}",
+  "url":       "{{rule.url}}",
+  "value":     "{{context.value}}",
+  "threshold": "{{context.threshold}}"
+}
+```
+
+| 변수 | 의미 |
+|---|---|
+| `{{rule.id}}` | 룰 UUID |
+| `{{rule.name}}` | 룰 이름 |
+| `{{rule.url}}` | Kibana 룰 페이지 link |
+| `{{context.value}}` | 임계 초과한 값 |
+| `{{context.threshold}}` | 설정 임계 |
+| `{{date}}` | 발화 시각 |
+| `{{alert.actionGroup}}` | "default" / "recovered" |
+
+### 권장 아키텍처 — *Kibana 는 trigger, oncall API 가 escalation 담당*
+
+```
+Kibana Rule  →  Webhook  →  사내 oncall API
+                            ① rotation 조회 (지금 누구?)
+                            ② SMS / 카카오 / 전화 발송
+                            ③ Confirm 안 오면 escalate
+                            ④ 응답 시 Kibana 에 ack 콜백
+```
+
+### 같이 알아두면 좋은 기능
+
+- **Recovery action**: 사고 해소 시 자동 호출 (Run when: "Recovered") → resolution 통보 자동
+- **Throttle**: "On status changes only" 권장 (폭주 방지)
+- **Multiple Actions**: 한 룰에 Webhook + Slack + Index 동시 발송 가능
+- **Cases connector**: incident 케이스 자동 생성 → postmortem 까지 한 화면
+
+### 함정 7가지
+
+| 증상 | 해결 |
+|---|---|
+| Webhook 401 | URL/auth 검증 — Test 버튼 먼저 |
+| Webhook timeout | 기본 10초 — 사내 API 응답 빨리 (또는 비동기 ack 패턴) |
+| HTTPS 인증서 에러 (self-signed) | `xpack.actions.tls.verificationMode: none` (운영 비추천) |
+| `{{context.value}}` 빈 문자열 | 룰 타입 별로 변수 다름 — Test action 으로 확인 |
+| 한글 깨짐 | `Content-Type: application/json; charset=utf-8` |
+| 알림 폭주 | "On status changes only" + Throttle |
+| 메시지 dedupe 안 됨 | Webhook 본문에 `alert.id` 포함 → oncall API 측에서 dedupe |
+
+### 한 줄 결론
+
+> **Webhook Connector + Basic 라이선스로 사내 oncall API 즉시 연동 가능**. Kibana 는 단순 trigger, *전화/SMS/escalation* 은 사내 시스템이 담당. → 자세한 흐름은 [09 §6 Alerting](09-monitoring-strategy.md).
+
+---
+
 ## 보강 정책
 
 새 Q-NN 이 등록되면:
