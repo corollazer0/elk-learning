@@ -680,6 +680,175 @@ Kibana Rule  →  Webhook  →  사내 oncall API
 
 ---
 
+## Q-13. Lens 의 시간 설정과 Dashboard 의 시간 설정 — 어느 게 우선?
+
+### 결론
+
+**Dashboard 시간 이 master**. Lens 자체에는 시간 범위가 저장되지 않음.
+
+```
+Dashboard 시간 (master)
+   ↓ inherit
+Panel A (Lens)  / Panel B (Lens)  / Panel C (Lens)
+```
+
+Lens 편집기에서 본 시간은 *미리보기* 일 뿐 — Save 해도 시간 정보 함께 저장되지 않음.
+
+### 한 패널만 독립 시간으로 만들기 — Custom Time Range
+
+```
+Dashboard → 해당 패널 우측 ⋮ (gear/menu)
+  → "More"
+    → "Customize time range"
+      From: now-30d
+      To:   now
+      [Save]
+→ 그 패널 좌상단에 ⏱️ 라벨 표시 (dashboard 시간 무시)
+```
+
+### 우선순위 매트릭스
+
+| 시나리오 | Dashboard 시간 | Panel custom | 적용 |
+|---|---|---|---|
+| 일반 Lens 추가 | Last 7d | — | **Last 7d (dashboard)** |
+| Custom time range 활성 | Last 7d | Last 30d | **Last 30d (panel)** |
+| Custom time range 해제 | Last 7d | (해제) | Last 7d (dashboard 복귀) |
+
+### 함정
+
+| 증상 | 해결 |
+|---|---|
+| Lens 편집기와 dashboard 의 차트가 다름 | 정상 — 편집기는 미리보기 |
+| Dashboard 시간 바꿔도 한 패널만 안 바뀜 | Custom time range 활성 — 패널 ⋮ → "Remove custom time range" |
+| 매번 열 때마다 시간이 다름 | "Store time with dashboard" 체크 안 됨 → Q-14 |
+| 같은 Lens 를 여러 dashboard 에 다른 시간으로 | Library 에 1개 + 각 dashboard 의 panel custom |
+
+### 권장 패턴
+
+```
+D3 주간 점검 dashboard:
+  Dashboard 시간: Last 7 days  (master)
+  ├─ M-S2 TPS         ← inherit
+  ├─ M-S4 p95         ← inherit
+  ├─ M-S10 Budget     ← Panel custom: Last 30d rolling ★
+  └─ M-O5 DoD/WoW     ← inherit + timeshift 1d
+```
+
+---
+
+## Q-14. 항상 *어제 09시 → 오늘 09시* 24시간 윈도우 보기
+
+### 결론 — Date Math + Store time with dashboard
+
+```
+From:  now-1d/d+9h       ← 어제 09:00 (KST)
+To:    now/d+9h          ← 오늘 09:00 (KST)
++ Save → ☑ Store time with dashboard
+```
+
+→ 새벽 2시에 열든 오후 3시에 열든 **동일한 24시간 윈도우** 표시.
+
+### Date Math 풀이
+
+| 표현 | 의미 |
+|---|---|
+| `now/d` | 오늘 00:00 |
+| `now/d+9h` | 오늘 09:00 |
+| `now-1d/d+9h` | 어제 09:00 |
+| `+9h` | 9시간 더하기 (= "9시" 의미) |
+| `/d` | 일 단위로 round-down |
+
+### 단계별 설정 (스크린샷 기준)
+
+```
+1. Dashboard 화면에서 우상단 시간 픽커 클릭
+   ┌──────────────────────────────────┐
+   │ 📅 Last 7 days  ◯ Apply ▼        │ ← 클릭
+   └──────────────────────────────────┘
+
+2. 펼친 패널 → 좌상단 [Show dates] 또는 직접 입력 영역
+   ┌──────────────────────────────────────┐
+   │  Quick select  Commonly used  Custom │
+   │ ──────────────                       │
+   │  From  [ now-1d/d+9h         ]       │  ← 직접 입력
+   │  To    [ now/d+9h            ]       │
+   │           [Update]                   │
+   └──────────────────────────────────────┘
+
+3. [Update] → 차트가 어제 9시~오늘 9시로 갱신 (확인)
+
+4. Dashboard 우상단 [Save] 버튼 클릭
+   ┌──────────────────────────────────────┐
+   │ Save dashboard                        │
+   │ Title    [D2 일간 점검 (9-9)        ] │
+   │ Description ...                       │
+   │ ☑ Store time with dashboard           │ ★ 반드시 체크
+   │ □ Tags                                │
+   │            [Save]                     │
+   └──────────────────────────────────────┘
+
+5. 이후 누가 열어도 → date math 가 *재계산* 되어 같은 윈도우 표시
+```
+
+### 시간대 (Timezone) 확인 — 중요
+
+`+9h` 는 **Kibana 의 timezone 설정** 기준:
+
+```
+Stack Management → Advanced Settings → dateFormat:tz
+
+❌ "Browser" — 브라우저 OS 시간대
+   → 서버에서 보면 UTC, 한국에서 보면 KST → 사용자마다 결과 다름
+
+✅ "Asia/Seoul" — 강제 KST
+   → 모든 사용자에게 동일 한국 9시
+```
+
+→ **사내 표준은 `Asia/Seoul` 강제** 설정 권장.
+
+### 다른 cadence 응용
+
+| 윈도우 | From | To |
+|---|---|---|
+| 어제 9시 → 오늘 9시 (24h) | `now-1d/d+9h` | `now/d+9h` |
+| 지난주 월 9시 → 이번주 월 9시 | `now-1w/w+1d+9h` | `now/w+1d+9h` |
+| 지난달 1일 9시 → 이번달 1일 9시 | `now-1M/M+9h` | `now/M+9h` |
+| 오늘 9시 → 지금 | `now/d+9h` | `now` |
+| 어제 0시 → 오늘 0시 (calendar) | `now-1d/d` | `now/d` |
+
+### Store time with dashboard 체크 안 하면?
+
+| 상황 | "Store time" ON | "Store time" OFF |
+|---|---|---|
+| 다른 사용자가 열기 | 9-9 표시 | *마지막에 본 사람의 시간* |
+| 이메일 / Slack 공유 링크 | 9-9 일관 | 클릭한 시각의 default |
+| 신뢰성 | ✅ 일관 | ❌ 매번 다름 |
+
+→ **9-9 같은 비즈니스 윈도우는 반드시 Store time ON**.
+
+### 검증 — 실제 어떤 시각이 적용되나?
+
+지금이 **2026-05-01 14:00 KST** 라고 가정:
+
+```
+now              = 2026-05-01 14:00 KST
+now/d            = 2026-05-01 00:00 KST  (오늘 자정)
+now/d+9h         = 2026-05-01 09:00 KST  ← To
+now-1d/d         = 2026-04-30 00:00 KST
+now-1d/d+9h      = 2026-04-30 09:00 KST  ← From
+
+→ 윈도우: 2026-04-30 09:00 ~ 2026-05-01 09:00  (정확히 24시간)
+```
+
+새벽 02:00 KST 에 열면? 같은 결과 — `/d` 가 round-down 이라 *오늘* 의 00:00 가 나오기 때문.
+
+### 한 줄 결론
+
+> **`From: now-1d/d+9h` / `To: now/d+9h`** 입력 → [Update] → [Save] → ☑ **Store time with dashboard** → 끝.
+> 시간대가 `Asia/Seoul` 인지 Advanced Settings 에서 사전 확인.
+
+---
+
 ## 보강 정책
 
 새 Q-NN 이 등록되면:
