@@ -4,6 +4,8 @@
 >
 > *시간대 패턴* + *인덱스 헬스* — capacity 계획과 메타 모니터링. Op-Excellence (X 시리즈) 는 ES 운영팀 전용.
 
+> ⏱️ **시간 범위 안내**: 메트릭 제목 옆은 **권장 default**. 운영 메트릭은 보통 *주~월 단위* 가 의미 있음. 실습 데이터셋은 2026-04-01~30 절대 시각.
+
 ---
 
 ## 학습 순서 추천
@@ -23,7 +25,7 @@
 
 ---
 
-## M-O1. Time-of-Day Pattern (시간대 분포)
+## M-O1. Time-of-Day Pattern (시간대 분포) — ⏱️ Last 30 days
 
 **한 줄 정의**: 24시간 × 트래픽 heatmap
 
@@ -65,7 +67,7 @@
 
 ---
 
-## M-O2. Day-of-Week Pattern
+## M-O2. Day-of-Week Pattern — ⏱️ Last 30 days
 
 **Kibana 만들기**:
 
@@ -81,7 +83,7 @@
 
 ---
 
-## M-O3. Dead svc_id
+## M-O3. Dead svc_id — ⏱️ Last 7 days
 
 **한 줄 정의**: Spring Mapping 선언 ∧ ES 호출 0인 svc_id (24h+)
 
@@ -108,7 +110,7 @@
 
 ---
 
-## M-O4. Shadow svc_id
+## M-O4. Shadow svc_id — ⏱️ Last 7 days
 
 **한 줄 정의**: ES 호출 ∧ Spring mapping 미선언 svc_id
 
@@ -121,7 +123,7 @@
 
 ---
 
-## M-O5. DoD / WoW Traffic Change ⭐
+## M-O5. DoD / WoW Traffic Change ⭐ — ⏱️ Last 14 days
 
 **한 줄 정의**: 어제 / 지난주 같은 요일 대비 % 변화
 
@@ -166,7 +168,7 @@
 
 ---
 
-## M-O6. Peak RPS + 시간대
+## M-O6. Peak RPS + 시간대 — ⏱️ Last 30 days
 
 **한 줄 정의**: 일/주 단위 max(count) + 그 시각
 
@@ -190,7 +192,7 @@ Display: "이번주 peak RPS"
 
 ---
 
-## M-X1. Pipeline Stage Lag
+## M-X1. Pipeline Stage Lag — ⏱️ Last 24 hours
 
 **한 줄 정의**: takes.* 필드 — 각 단계 처리 시간
 
@@ -219,7 +221,7 @@ Display: "이번주 peak RPS"
 
 ---
 
-## M-X2. Index Storage Health
+## M-X2. Index Storage Health — ⏱️ Last 30 days
 
 **한 줄 정의**: 일자별 인덱스 size, shard 수, segment 수
 
@@ -249,7 +251,7 @@ Display: "이번주 peak RPS"
 
 ---
 
-## M-X3. doc_sz 분포
+## M-X3. doc_sz 분포 — ⏱️ Last 7 days
 
 **Kibana 만들기**:
 
@@ -267,7 +269,7 @@ Display: "이번주 peak RPS"
 
 ---
 
-## M-X4. Schema Stability
+## M-X4. Schema Stability — ⏱️ Last 30 days
 
 **한 줄 정의**: 신규 필드 자동 매핑 빈도
 

@@ -4,6 +4,14 @@
 >
 > SRE 4대 시그널 (Latency / Traffic / Errors / Saturation) 을 우리 환경에 맞게 10개 메트릭으로 분리. 이 카테고리에서 [Tier S](09c-metric-priority.md) 5개 (M-S1, S2, S3, S4, S10) 가 나옴 — *가장 먼저 만들 것*.
 
+> ⏱️ **시간 범위 안내**:
+> - 각 메트릭 제목 옆 시간 범위는 **권장 default** (실 운영 기준)
+> - 우리 실습 데이터셋은 **2026-04-01 ~ 04-30 (30일 고정)** — Kibana 우상단 시간 픽커에서 *절대 시각* 으로 입력
+>   ```
+>   Start: 2026-04-01 00:00:00     End: 2026-04-30 23:59:59
+>   ```
+>   또는 "Last 30 days" 가 실 데이터를 모두 덮으면 그대로 사용 가능
+
 ---
 
 ## 학습 순서 추천
@@ -23,7 +31,7 @@
 
 ---
 
-## M-S1. Availability (가용성)
+## M-S1. Availability (가용성) — ⏱️ Last 24 hours
 
 **한 줄 정의**: OK 응답 / 전체 응답 ratio
 
@@ -72,7 +80,7 @@
 
 ---
 
-## M-S2. TPS / RPS (Throughput)
+## M-S2. TPS / RPS (Throughput) — ⏱️ Last 24 hours
 
 **한 줄 정의**: 초당 응답 수
 
@@ -111,7 +119,7 @@
 
 ---
 
-## M-S3. Error Rate (에러율)
+## M-S3. Error Rate (에러율) — ⏱️ Last 24 hours
 
 **한 줄 정의**: ERROR 응답 / 전체 응답
 
@@ -154,7 +162,7 @@
 
 ---
 
-## M-S4. Latency p50/p95/p99
+## M-S4. Latency p50/p95/p99 — ⏱️ Last 24 hours
 
 **한 줄 정의**: 처리시간의 백분위수
 
@@ -194,7 +202,7 @@
 
 ---
 
-## M-S5. Slow Request Rate
+## M-S5. Slow Request Rate — ⏱️ Last 24 hours
 
 **한 줄 정의**: proc_tm > 1000ms 인 요청의 비율
 
@@ -231,7 +239,7 @@
 
 ---
 
-## M-S6. Saturation (인스턴스 부하)
+## M-S6. Saturation (인스턴스 부하) — ⏱️ Last 24 hours
 
 **한 줄 정의**: 컨테이너 별 트래픽 분포의 max/avg
 
@@ -265,7 +273,7 @@
 
 ---
 
-## M-S7. Tier 별 Availability
+## M-S7. Tier 별 Availability — ⏱️ Last 7 days
 
 **한 줄 정의**: PT/BT/MCI 각각의 가용성 분리
 
@@ -300,7 +308,7 @@
 
 ---
 
-## M-S8. 외부 의존성 (G/W) Latency
+## M-S8. 외부 의존성 (G/W) Latency — ⏱️ Last 24 hours
 
 **한 줄 정의**: GW_SEND/RECV 의 p95
 
@@ -336,7 +344,7 @@
 
 ---
 
-## M-S9. 코어 의존성 (MCI) Latency
+## M-S9. 코어 의존성 (MCI) Latency — ⏱️ Last 24 hours
 
 **한 줄 정의**: MCI_SEND/RECV 의 p95
 
@@ -365,7 +373,7 @@ Title: "M-S9 MCI core p95"
 
 ---
 
-## M-S10. Error Budget Burn Rate
+## M-S10. Error Budget Burn Rate — ⏱️ Last 30 days (rolling)
 
 **한 줄 정의**: 30일 rolling SLO 위반 누적
 

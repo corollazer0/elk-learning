@@ -4,6 +4,8 @@
 >
 > 사용자 segment / 채널 / OS / 기기 / 앱 버전 / 화면 / 코호트 — *PM 과 운영팀이 가장 좋아하는* 12 메트릭. **신규 카테고리** (09 정정 후 추가).
 
+> ⏱️ **시간 범위 안내**: 메트릭 제목 옆은 **권장 default**. 사용자/UX 메트릭은 보통 *주~월 단위* 가 의미 있음. 실습 데이터셋은 2026-04-01~30 절대 시각.
+
 ---
 
 ## 학습 순서 추천
@@ -25,7 +27,7 @@
 
 ---
 
-## M-U1. 채널별 Traffic Share
+## M-U1. 채널별 Traffic Share — ⏱️ Last 7 days
 
 **한 줄 정의**: count by chan_c
 
@@ -57,7 +59,7 @@
 
 ---
 
-## M-U2. 채널별 Error Rate
+## M-U2. 채널별 Error Rate — ⏱️ Last 7 days
 
 **Kibana 만들기**:
 
@@ -83,7 +85,7 @@
 
 ---
 
-## M-U3. 채널별 Latency 비교
+## M-U3. 채널별 Latency 비교 — ⏱️ Last 7 days
 
 ```
 M-U2 와 동일 구조
@@ -98,7 +100,7 @@ Title: "M-U3 채널별 p95 Latency"
 
 ---
 
-## M-U4. OS 별 분포
+## M-U4. OS 별 분포 — ⏱️ Last 30 days
 
 ```
 1. Lens → Donut
@@ -111,7 +113,7 @@ Title: "M-U3 채널별 p95 Latency"
 
 ---
 
-## M-U5. OS 버전별 Error Rate
+## M-U5. OS 버전별 Error Rate — ⏱️ Last 30 days
 
 **왜 보는가?**
 - 호환성 이슈 발견 — 오래된 OS 버전이 깨지는 신호
@@ -133,7 +135,7 @@ Title: "M-U3 채널별 p95 Latency"
 
 ---
 
-## M-U6. 기기 모델별 painPoint ⭐
+## M-U6. 기기 모델별 painPoint ⭐ — ⏱️ Last 30 days
 
 **한 줄 정의**: count(ERROR) by device_model, Top 20
 
@@ -176,7 +178,7 @@ Title: "M-U3 채널별 p95 Latency"
 
 ---
 
-## M-U7. 앱 버전 분포
+## M-U7. 앱 버전 분포 — ⏱️ Last 30 days
 
 ```
 Lens → Donut (또는 Bar)
@@ -194,7 +196,7 @@ Title: "M-U7 앱 버전 분포"
 
 ---
 
-## M-U8. 신 앱 버전 회귀 ⭐⭐
+## M-U8. 신 앱 버전 회귀 ⭐⭐ — ⏱️ Last 14 days
 
 **한 줄 정의**: 신 ap_ver 의 error rate vs 이전 ver
 
@@ -238,7 +240,7 @@ Title: "M-U7 앱 버전 분포"
 
 ---
 
-## M-U9. 화면별 Funnel (scrn_id)
+## M-U9. 화면별 Funnel (scrn_id) — ⏱️ Last 7 days
 
 **한 줄 정의**: 한 scrn_uuid 안의 svc_id 시퀀스 분석
 
@@ -263,7 +265,7 @@ KQL: scrn_id : "<특정 화면>"
 
 ---
 
-## M-U10. 사용자 retry 패턴 ⭐
+## M-U10. 사용자 retry 패턴 ⭐ — ⏱️ Last 24 hours
 
 **한 줄 정의**: 같은 dgtl_cusno + scrn_uuid 에서 sts_c:ERROR 가 ≥3 회
 
@@ -302,7 +304,7 @@ filter (post): err_count >= 3
 
 ---
 
-## M-U11. DAU / WAU / MAU ⭐⭐
+## M-U11. DAU / WAU / MAU ⭐⭐ — ⏱️ Last 1d / 7d / 30d (각각)
 
 **한 줄 정의**: cardinality(dgtl_cusno)
 
@@ -342,7 +344,7 @@ Title: "M-U11 일별 DAU 추세"
 
 ---
 
-## M-U12. IP 대역 분포
+## M-U12. IP 대역 분포 — ⏱️ Last 30 days
 
 ```
 1. Lens → Bar horizontal

@@ -4,6 +4,8 @@
 >
 > 백엔드 플랫폼 엔지니어 관점의 12 메트릭. **MSA 매트릭스, 컨테이너, In/Out 짝짓기, Tier latency** 가 핵심.
 
+> ⏱️ **시간 범위 안내**: 메트릭 제목 옆은 **권장 default**. 실습 데이터셋 (2026-04-01~30) 에선 우상단 시간 픽커 → "Absolute" → `2026-04-01 00:00` ~ `2026-04-30 23:59` 로 입력.
+
 ---
 
 ## 학습 순서 추천
@@ -25,7 +27,7 @@
 
 ---
 
-## M-P1. 11 MSA Health Matrix
+## M-P1. 11 MSA Health Matrix — ⏱️ Last 24 hours
 
 **한 줄 정의**: 11 svc_c × {availability, p95, tps, error count} 의 단일 표
 
@@ -69,7 +71,7 @@
 
 ---
 
-## M-P2. Tier Health Matrix (3 tier × KPI)
+## M-P2. Tier Health Matrix (3 tier × KPI) — ⏱️ Last 24 hours
 
 **한 줄 정의**: PT/BT/MCI 각각의 같은 KPI
 
@@ -91,7 +93,7 @@ Title: "M-P2 Tier Health Matrix"
 
 ---
 
-## M-P3. In/Out Imbalance
+## M-P3. In/Out Imbalance — ⏱️ Last 24 hours
 
 **한 줄 정의**: |IN 개수 - OUT 개수| / IN 개수 — 0 이면 완벽
 
@@ -129,7 +131,7 @@ Title: "M-P2 Tier Health Matrix"
 
 ---
 
-## M-P4. Stuck Requests (행 거래)
+## M-P4. Stuck Requests (행 거래) — ⏱️ Last 24 hours
 
 **한 줄 정의**: IN 만 있고 10분+ OUT 안 옴
 
@@ -172,7 +174,7 @@ filter (post): out_count == 0 AND first_in < now-10m
 
 ---
 
-## M-P5. Inter-Tier Latency (PT→BT, BT→MCI)
+## M-P5. Inter-Tier Latency (PT→BT, BT→MCI) — ⏱️ Last 24 hours
 
 **한 줄 정의**: 같은 guid 의 두 tier 시간 차
 
@@ -209,7 +211,7 @@ Transform 결과 인덱스 transform-tier-latency-5m 을:
 
 ---
 
-## M-P6. Top svc_id by Traffic
+## M-P6. Top svc_id by Traffic — ⏱️ Last 7 days
 
 **한 줄 정의**: count(*_OUT) by svc_id, Top 20
 
@@ -238,7 +240,7 @@ Transform 결과 인덱스 transform-tier-latency-5m 을:
 
 ---
 
-## M-P7. Top svc_id by Error
+## M-P7. Top svc_id by Error — ⏱️ Last 24 hours
 
 **한 줄 정의**: count(ERROR) by svc_id, Top 10
 
@@ -258,7 +260,7 @@ Title: "M-P7 Top 10 svc_id by Error"
 
 ---
 
-## M-P8. Container Error Rate
+## M-P8. Container Error Rate — ⏱️ Last 24 hours
 
 **한 줄 정의**: error rate by ctnr_nm
 
@@ -298,7 +300,7 @@ Title: "M-P7 Top 10 svc_id by Error"
 
 ---
 
-## M-P9. Container Throughput 분포
+## M-P9. Container Throughput 분포 — ⏱️ Last 24 hours
 
 **한 줄 정의**: count by ctnr_nm
 
@@ -320,7 +322,7 @@ Title: "M-P9 Container Throughput by MSA"
 
 ---
 
-## M-P10. Pipeline Lag (P0 — 데이터 신뢰)
+## M-P10. Pipeline Lag (P0 — 데이터 신뢰) — ⏱️ Last 1 hour
 
 **한 줄 정의**: now() - max(@timestamp) — 마지막 데이터가 얼마나 오래됐나?
 
@@ -353,7 +355,7 @@ Title: "M-P9 Container Throughput by MSA"
 
 ---
 
-## M-P11. Inter-Service Call Success
+## M-P11. Inter-Service Call Success — ⏱️ Last 7 days
 
 **한 줄 정의**: caller_uuid 기반 callee 의 success rate
 
@@ -378,7 +380,7 @@ metrics: ok / total
 
 ---
 
-## M-P12. 호출 Hop 분포
+## M-P12. 호출 Hop 분포 — ⏱️ Last 7 days
 
 **한 줄 정의**: 한 guid 의 PT/BT/MCI/GW doc 개수 분포
 

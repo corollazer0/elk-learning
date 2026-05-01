@@ -4,6 +4,8 @@
 >
 > *비즈니스 도메인* 관점의 12 메트릭. msg_c (에러 코드) / 결제 funnel / fir_c (root cause) / 핵심 거래 KPI.
 
+> ⏱️ **시간 범위 안내**: 메트릭 제목 옆은 **권장 default**. 실습 데이터셋 (2026-04-01~30) 에선 우상단 시간 픽커 → "Absolute" 입력.
+
 ---
 
 ## 학습 순서 추천
@@ -25,7 +27,7 @@
 
 ---
 
-## M-D1. Top msg_c (Top 에러 코드)
+## M-D1. Top msg_c (Top 에러 코드) — ⏱️ Last 7 days
 
 **한 줄 정의**: count(*) by msg_c, Top 20 — sts_c:ERROR 만
 
@@ -60,7 +62,7 @@
 
 ---
 
-## M-D2. 신규 msg_c (set diff)
+## M-D2. 신규 msg_c (set diff) — ⏱️ Last 30 days
 
 **한 줄 정의**: 오늘 처음 본 msg_c (지난 7일 base 외)
 
@@ -92,7 +94,7 @@
 
 ---
 
-## M-D3. Critical svc_id Error Rate
+## M-D3. Critical svc_id Error Rate — ⏱️ Last 24 hours
 
 **한 줄 정의**: 결제/인증/이체 svc_id 의 error rate
 
@@ -131,7 +133,7 @@
 
 ---
 
-## M-D4. MSA × msg_c Heatmap
+## M-D4. MSA × msg_c Heatmap — ⏱️ Last 7 days
 
 **한 줄 정의**: svc_c × msg_c grid
 
@@ -161,7 +163,7 @@
 
 ---
 
-## M-D5. 결제 Funnel (PY scrn_uuid 단위)
+## M-D5. 결제 Funnel (PY scrn_uuid 단위) — ⏱️ Last 7 days
 
 **한 줄 정의**: 결제 5단계 reach rate
 
@@ -198,7 +200,7 @@
 
 ---
 
-## M-D6. 인증 성공률 (MB)
+## M-D6. 인증 성공률 (MB) — ⏱️ Last 7 days
 
 **한 줄 정의**: MB 의 sts_c:OK / total
 
@@ -224,7 +226,7 @@
 
 ---
 
-## M-D7. 카드 거래 추세 (CD)
+## M-D7. 카드 거래 추세 (CD) — ⏱️ Last 30 days
 
 **Kibana 만들기**:
 
@@ -238,7 +240,7 @@ Title: "M-D7 카드 거래 추세"
 
 ---
 
-## M-D8. 이체 성공률 (FA)
+## M-D8. 이체 성공률 (FA) — ⏱️ Last 7 days
 
 ```
 Filter: svc_c : "FA" and biz_c : "transfer*"
@@ -248,7 +250,7 @@ Title: "M-D8 이체 성공률"
 
 ---
 
-## M-D9. fir_c 분포 (Root Cause)
+## M-D9. fir_c 분포 (Root Cause) — ⏱️ Last 24 hours
 
 **한 줄 정의**: 첫 에러가 어느 tier 에서 발생했나?
 
@@ -281,7 +283,7 @@ Title: "M-D8 이체 성공률"
 
 ---
 
-## M-D10. svc_c 별 거래량 추세
+## M-D10. svc_c 별 거래량 추세 — ⏱️ Last 30 days
 
 **Kibana 만들기**:
 
@@ -301,7 +303,7 @@ Title: "M-D8 이체 성공률"
 
 ---
 
-## M-D11. 동시 활성 거래
+## M-D11. 동시 활성 거래 — ⏱️ Last 24 hours
 
 **한 줄 정의**: 5분 윈도우 안의 unique guid
 
@@ -317,7 +319,7 @@ Title: "M-D8 이체 성공률"
 
 ---
 
-## M-D12. biz_c 별 분포 (도메인 painPoint)
+## M-D12. biz_c 별 분포 (도메인 painPoint) — ⏱️ Last 7 days
 
 ```
 Filter: svc_c : "<특정>"
